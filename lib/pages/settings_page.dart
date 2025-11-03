@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:fluent_ui/fluent_ui.dart' as fluent_ui;
 import '../utils/theme_manager.dart';
 import '../services/url_service.dart';
 import '../services/auth_service.dart';
@@ -142,6 +144,18 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 检查是否使用 Fluent UI
+    final isFluentUI = Platform.isWindows && ThemeManager().isFluentFramework;
+    
+    if (isFluentUI) {
+      return _buildFluentUI(context);
+    }
+    
+    return _buildMaterialUI(context);
+  }
+
+  /// 构建 Material UI 版本
+  Widget _buildMaterialUI(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     
     return Scaffold(
@@ -182,7 +196,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 
                 // 歌词设置（仅 Windows 和 Android 平台显示）
                 const LyricSettings(),
-                  const SizedBox(height: 24),
+                const SizedBox(height: 24),
                 
                 // 播放设置
                 const PlaybackSettings(),
@@ -204,6 +218,49 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ],
       ),
+    );
+  }
+
+  /// 构建 Fluent UI 版本（Windows 11 风格）
+  Widget _buildFluentUI(BuildContext context) {
+    return fluent_ui.ScaffoldPage.scrollable(
+      padding: const EdgeInsets.all(24.0),
+      header: const fluent_ui.PageHeader(
+        title: Text('设置'),
+      ),
+      children: [
+        // 用户卡片
+        UserCard(),
+        const SizedBox(height: 16),
+        
+        // 第三方账号管理
+        ThirdPartyAccounts(),
+        const SizedBox(height: 16),
+        
+        // 外观设置
+        const AppearanceSettings(),
+        const SizedBox(height: 16),
+        
+        // 歌词设置
+        const LyricSettings(),
+        const SizedBox(height: 16),
+        
+        // 播放设置
+        const PlaybackSettings(),
+        const SizedBox(height: 16),
+        
+        // 网络设置
+        const NetworkSettings(),
+        const SizedBox(height: 16),
+        
+        // 存储设置
+        const StorageSettings(),
+        const SizedBox(height: 16),
+        
+        // 关于
+        const AboutSettings(),
+        const SizedBox(height: 40),
+      ],
     );
   }
 }

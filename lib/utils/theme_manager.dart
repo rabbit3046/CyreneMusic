@@ -1,6 +1,14 @@
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/system_theme_color_service.dart';
+
+/// 桌面端主题框架
+enum ThemeFramework {
+  material,
+  fluent,
+}
 
 /// 预设主题色方案
 class ThemeColorScheme {
@@ -43,13 +51,265 @@ class ThemeManager extends ChangeNotifier {
   Color _seedColor = Colors.deepPurple;
   bool _followSystemColor = true; // 默认跟随系统主题色
   Color? _systemColor; // 系统主题色缓存
+  ThemeFramework _themeFramework = ThemeFramework.material; // 默认使用 Material 3
 
   ThemeMode get themeMode => _themeMode;
   Color get seedColor => _seedColor;
   bool get followSystemColor => _followSystemColor;
   Color? get systemColor => _systemColor;
+  ThemeFramework get themeFramework => _themeFramework;
+  bool get isMaterialFramework => _themeFramework == ThemeFramework.material;
+  bool get isFluentFramework => _themeFramework == ThemeFramework.fluent;
 
   bool get isDarkMode => _themeMode == ThemeMode.dark;
+
+  /// 根据当前主题框架生成 ThemeData
+  ThemeData buildThemeData(Brightness brightness) {
+    return switch (_themeFramework) {
+      ThemeFramework.material => _buildMaterialTheme(brightness),
+      ThemeFramework.fluent => _buildFluentTheme(brightness),
+    };
+  }
+
+  fluent.FluentThemeData buildFluentThemeData(Brightness brightness) {
+    return fluent.FluentThemeData(
+      brightness: brightness,
+      accentColor: _buildAccentColor(_seedColor),
+      fontFamily: 'Microsoft YaHei',
+    );
+  }
+
+  ThemeData _buildMaterialTheme(Brightness brightness) {
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: _seedColor,
+      brightness: brightness,
+    );
+
+    return ThemeData(
+      useMaterial3: true,
+      fontFamily: 'Microsoft YaHei',
+      colorScheme: colorScheme,
+      cardTheme: const CardThemeData(
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
+        color: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+      ),
+      navigationRailTheme: NavigationRailThemeData(
+        indicatorShape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+      ),
+    );
+  }
+
+  fluent.AccentColor _buildAccentColor(Color color) {
+    return fluent.AccentColor.swatch({
+      'lightest': _shiftColor(color, 0.5),
+      'lighter': _shiftColor(color, 0.35),
+      'light': _shiftColor(color, 0.2),
+      'normal': color,
+      'dark': _shiftColor(color, -0.15),
+      'darker': _shiftColor(color, -0.3),
+      'darkest': _shiftColor(color, -0.45),
+    });
+  }
+
+  ThemeData _buildFluentTheme(Brightness brightness) {
+    final baseScheme = ColorScheme.fromSeed(
+      seedColor: _seedColor,
+      brightness: brightness,
+    );
+
+    final bool isLight = brightness == Brightness.light;
+    final surface = isLight ? const Color(0xFFFFFFFF) : const Color(0xFF1F1F1F);
+    final background = isLight ? const Color(0xFFF3F3F3) : const Color(0xFF121212);
+    final onSurface = isLight ? const Color(0xFF1B1B1B) : Colors.white;
+    final borderColor = isLight
+        ? Colors.black.withOpacity(0.06)
+        : Colors.white.withOpacity(0.08);
+
+    final colorScheme = baseScheme.copyWith(
+      surface: surface,
+      background: background,
+      onSurface: onSurface,
+    );
+
+    return ThemeData(
+      useMaterial3: false,
+      fontFamily: 'Microsoft YaHei',
+      colorScheme: colorScheme,
+      scaffoldBackgroundColor: background,
+      canvasColor: background,
+      cardColor: surface,
+      dialogBackgroundColor: surface,
+      dividerTheme: DividerThemeData(
+        color: borderColor,
+        thickness: 1,
+      ),
+      cardTheme: CardThemeData(
+        color: surface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(color: borderColor),
+        ),
+        surfaceTintColor: Colors.transparent,
+      ),
+      navigationRailTheme: NavigationRailThemeData(
+        backgroundColor: surface,
+        indicatorShape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+        indicatorColor: baseScheme.primary.withOpacity(0.18),
+        selectedIconTheme: IconThemeData(color: baseScheme.primary),
+        selectedLabelTextStyle: TextStyle(
+          color: baseScheme.primary,
+          fontWeight: FontWeight.w600,
+        ),
+        unselectedLabelTextStyle: TextStyle(
+          color: onSurface.withOpacity(0.7),
+        ),
+      ),
+      listTileTheme: ListTileThemeData(
+        tileColor: surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+        selectedColor: baseScheme.primary,
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(color: borderColor),
+        ),
+      ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+        elevation: 4,
+      ),
+      checkboxTheme: CheckboxThemeData(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(4),
+        ),
+      ),
+      radioTheme: RadioThemeData(
+        fillColor: MaterialStateProperty.all(baseScheme.primary),
+      ),
+      switchTheme: SwitchThemeData(
+        thumbColor: MaterialStateProperty.resolveWith((states) {
+          if (states.contains(MaterialState.selected)) {
+            return Colors.white;
+          }
+          return isLight ? const Color(0xFFE1E1E1) : const Color(0xFF2E2E2E);
+        }),
+        trackColor: MaterialStateProperty.resolveWith((states) {
+          if (states.contains(MaterialState.selected)) {
+            return baseScheme.primary;
+          }
+          return isLight ? const Color(0xFFC6C6C6) : const Color(0xFF3A3A3A);
+        }),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: surface,
+        behavior: SnackBarBehavior.floating,
+        elevation: 4,
+        contentTextStyle: TextStyle(color: onSurface),
+        actionTextColor: baseScheme.primary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(color: borderColor),
+        ),
+      ),
+      tooltipTheme: TooltipThemeData(
+        decoration: BoxDecoration(
+          color: isLight
+              ? Colors.black.withOpacity(0.85)
+              : Colors.white.withOpacity(0.9),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        textStyle: TextStyle(
+          color: isLight ? Colors.white : Colors.black,
+        ),
+      ),
+      tabBarTheme: TabBarThemeData(
+        labelColor: baseScheme.primary,
+        unselectedLabelColor: onSurface.withOpacity(0.7),
+        indicator: UnderlineTabIndicator(
+          borderSide: BorderSide(color: baseScheme.primary, width: 2),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: surface,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: BorderSide(color: borderColor),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: BorderSide(color: borderColor),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: BorderSide(color: baseScheme.primary, width: 1.8),
+        ),
+      ),
+      bottomNavigationBarTheme: BottomNavigationBarThemeData(
+        backgroundColor: surface,
+        selectedItemColor: baseScheme.primary,
+        unselectedItemColor: onSurface.withOpacity(0.7),
+        type: BottomNavigationBarType.fixed,
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: ButtonStyle(
+          foregroundColor: MaterialStateProperty.all(baseScheme.primary),
+          shape: MaterialStateProperty.all(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          ),
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ButtonStyle(
+          shape: MaterialStateProperty.all(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          ),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: ButtonStyle(
+          shape: MaterialStateProperty.all(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          ),
+        ),
+      ),
+      sliderTheme: SliderThemeData(
+        trackHeight: 4,
+        activeTrackColor: baseScheme.primary,
+        inactiveTrackColor: onSurface.withOpacity(isLight ? 0.1 : 0.3),
+        thumbColor: baseScheme.primary,
+      ),
+      appBarTheme: AppBarTheme(
+        backgroundColor: background,
+        elevation: 0,
+        foregroundColor: onSurface,
+        centerTitle: false,
+      ),
+    );
+  }
+
+  Color _shiftColor(Color color, double amount) {
+    final hsl = HSLColor.fromColor(color);
+    final lightness = (hsl.lightness + amount).clamp(0.0, 1.0).toDouble();
+    return hsl.withLightness(lightness).toColor();
+  }
 
   /// 从本地存储加载主题设置
   Future<void> _loadSettings() async {
@@ -66,10 +326,19 @@ class ThemeManager extends ChangeNotifier {
       // 加载主题色
       final colorValue = prefs.getInt('seed_color') ?? Colors.deepPurple.value;
       _seedColor = Color(colorValue);
+
+      // 加载桌面主题框架
+      final frameworkIndex = prefs.getInt('theme_framework') ?? ThemeFramework.material.index;
+      if (frameworkIndex >= 0 && frameworkIndex < ThemeFramework.values.length) {
+        _themeFramework = ThemeFramework.values[frameworkIndex];
+      } else {
+        _themeFramework = ThemeFramework.material;
+      }
       
       print('🎨 [ThemeManager] 从本地加载主题: ${_themeMode.name}');
       print('🎨 [ThemeManager] 跟随系统主题色: $_followSystemColor');
       print('🎨 [ThemeManager] 主题色: 0x${_seedColor.value.toRadixString(16)}');
+      print('🎨 [ThemeManager] 桌面主题框架: ${_themeFramework.name}');
       notifyListeners();
     } catch (e) {
       print('❌ [ThemeManager] 加载主题设置失败: $e');
@@ -106,6 +375,17 @@ class ThemeManager extends ChangeNotifier {
       print('💾 [ThemeManager] 跟随系统主题色设置已保存: $_followSystemColor');
     } catch (e) {
       print('❌ [ThemeManager] 保存跟随系统主题色设置失败: $e');
+    }
+  }
+
+  /// 保存桌面主题框架到本地
+  Future<void> _saveThemeFramework() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('theme_framework', _themeFramework.index);
+      print('💾 [ThemeManager] 桌面主题框架已保存: ${_themeFramework.name}');
+    } catch (e) {
+      print('❌ [ThemeManager] 保存桌面主题框架失败: $e');
     }
   }
 
@@ -156,6 +436,15 @@ class ThemeManager extends ChangeNotifier {
         await fetchAndApplySystemColor(context);
       }
       
+      notifyListeners();
+    }
+  }
+
+  /// 设置桌面端主题框架
+  void setThemeFramework(ThemeFramework framework) {
+    if (_themeFramework != framework) {
+      _themeFramework = framework;
+      _saveThemeFramework();
       notifyListeners();
     }
   }

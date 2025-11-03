@@ -1,8 +1,10 @@
 import 'dart:io';
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import 'package:flutter/material.dart';
 import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:window_manager/window_manager.dart';
 import 'layouts/main_layout.dart';
+import 'layouts/fluent_main_layout.dart';
 import 'utils/theme_manager.dart';
 import 'services/player_service.dart';
 import 'services/system_media_service.dart';
@@ -64,8 +66,6 @@ void main() async {
         await windowManager.setIcon('assets/icons/tray_icon.png');
       }
       
-      // 对于隐藏标题栏的窗口，确保以无边框模式运行，避免启动时不可见
-      await windowManager.setAsFrameless();
       await windowManager.show();
       await windowManager.focus();
       // 设置关闭窗口时不退出应用（会触发 onWindowClose 回调）
@@ -166,66 +166,59 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final themeManager = ThemeManager();
+
     return AnimatedBuilder(
-      animation: ThemeManager(),
+      animation: themeManager,
       builder: (context, _) {
+        final lightTheme = themeManager.buildThemeData(Brightness.light);
+        final darkTheme = themeManager.buildThemeData(Brightness.dark);
+
+        final useFluentLayout = Platform.isWindows && themeManager.isFluentFramework;
+
+        if (useFluentLayout) {
+          return fluent.FluentApp(
+            title: 'Cyrene Music',
+            debugShowCheckedModeBanner: false,
+            theme: themeManager.buildFluentThemeData(Brightness.light),
+            darkTheme: themeManager.buildFluentThemeData(Brightness.dark),
+            themeMode: _mapMaterialThemeMode(themeManager.themeMode),
+            scrollBehavior: const _FluentScrollBehavior(),
+            home: const FluentMainLayout(),
+          );
+        }
+
         return MaterialApp(
           title: 'Cyrene Music',
           debugShowCheckedModeBanner: false,
-          theme: ThemeData(
-        // 使用 Material Design 3
-        useMaterial3: true,
-        // 字体
-        fontFamily: 'Microsoft YaHei',
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: ThemeManager().seedColor,
-          brightness: Brightness.light,
-        ),
-        // 卡片主题
-        cardTheme: const CardThemeData(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(12)),
-          ),
-          color: Colors.transparent,
-          surfaceTintColor: Colors.transparent,
-        ),
-        // 导航栏主题
-        navigationRailTheme: NavigationRailThemeData(
-          indicatorShape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        // 字体
-        fontFamily: 'Microsoft YaHei',
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: ThemeManager().seedColor,
-          brightness: Brightness.dark,
-        ),
-        cardTheme: const CardThemeData(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(12)),
-          ),
-          color: Colors.transparent,
-          surfaceTintColor: Colors.transparent,
-        ),
-        navigationRailTheme: const NavigationRailThemeData(
-          indicatorShape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(12)),
-          ),
-        ),
-      ),
-      themeMode: ThemeManager().themeMode,
+          theme: lightTheme,
+          darkTheme: darkTheme,
+          themeMode: themeManager.themeMode,
       home: Platform.isWindows
           ? _WindowsRoundedContainer(child: const MainLayout())
           : const MainLayout(),
         );
       },
     );
+  }
+}
+
+fluent.ThemeMode _mapMaterialThemeMode(ThemeMode mode) {
+  switch (mode) {
+    case ThemeMode.light:
+      return fluent.ThemeMode.light;
+    case ThemeMode.dark:
+      return fluent.ThemeMode.dark;
+    case ThemeMode.system:
+      return fluent.ThemeMode.system;
+  }
+}
+class _FluentScrollBehavior extends MaterialScrollBehavior {
+  const _FluentScrollBehavior();
+
+  @override
+  Widget buildOverscrollIndicator(BuildContext context, Widget child, ScrollableDetails details) {
+    return child;
   }
 }
 

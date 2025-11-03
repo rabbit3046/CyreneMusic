@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:fluent_ui/fluent_ui.dart' as fluent_ui;
 import '../../utils/theme_manager.dart';
 import '../../services/layout_preference_service.dart';
 import '../../services/player_background_service.dart';
 import '../../widgets/custom_color_picker_dialog.dart';
+import '../../widgets/fluent_settings_card.dart';
 import 'player_background_dialog.dart';
 
 /// 外观设置组件
@@ -17,6 +19,18 @@ class AppearanceSettings extends StatefulWidget {
 class _AppearanceSettingsState extends State<AppearanceSettings> {
   @override
   Widget build(BuildContext context) {
+    // 检查是否使用 Fluent UI
+    final isFluentUI = Platform.isWindows && ThemeManager().isFluentFramework;
+    
+    if (isFluentUI) {
+      return _buildFluentUI();
+    }
+    
+    return _buildMaterialUI();
+  }
+
+  /// 构建 Material UI 版本
+  Widget _buildMaterialUI() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -70,6 +84,14 @@ class _AppearanceSettingsState extends State<AppearanceSettings> {
               if (Platform.isWindows) ...[
                 const Divider(height: 1),
                 ListTile(
+                  leading: const Icon(Icons.layers),
+                  title: const Text('桌面主题样式'),
+                  subtitle: Text(_getThemeFrameworkSubtitle()),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _showThemeFrameworkDialog(),
+                ),
+                const Divider(height: 1),
+                ListTile(
                   leading: const Icon(Icons.view_quilt),
                   title: const Text('布局模式'),
                   subtitle: Text(LayoutPreferenceService().getLayoutDescription()),
@@ -79,6 +101,67 @@ class _AppearanceSettingsState extends State<AppearanceSettings> {
               ],
             ],
           ),
+        ),
+      ],
+    );
+  }
+
+  /// 构建 Fluent UI 版本（Windows 11 风格 - 每个选项独立卡片）
+  Widget _buildFluentUI() {
+    return FluentSettingsGroup(
+      title: '外观',
+      children: [
+        FluentSwitchTile(
+          icon: fluent_ui.FluentIcons.clear_night,
+          title: '深色模式',
+          subtitle: '启用深色主题',
+          value: ThemeManager().isDarkMode,
+          onChanged: (value) {
+            ThemeManager().toggleDarkMode(value);
+          },
+        ),
+        FluentSwitchTile(
+          icon: fluent_ui.FluentIcons.color,
+          title: '跟随系统主题色',
+          subtitle: _getFollowSystemColorSubtitle(),
+          value: ThemeManager().followSystemColor,
+          onChanged: (value) async {
+            await ThemeManager().setFollowSystemColor(value, context: context);
+            setState(() {});
+          },
+        ),
+        FluentSettingsTile(
+          icon: fluent_ui.FluentIcons.color_solid,
+          title: '主题色',
+          subtitle: _getCurrentThemeColorName(),
+          trailing: ThemeManager().followSystemColor
+              ? const Icon(fluent_ui.FluentIcons.lock, size: 16)
+              : const Icon(fluent_ui.FluentIcons.chevron_right, size: 12),
+          onTap: ThemeManager().followSystemColor 
+              ? null
+              : () => _showThemeColorPicker(),
+          enabled: !ThemeManager().followSystemColor,
+        ),
+        FluentSettingsTile(
+          icon: fluent_ui.FluentIcons.picture_library,
+          title: '播放器背景',
+          subtitle: '${PlayerBackgroundService().getBackgroundTypeName()} - ${PlayerBackgroundService().getBackgroundTypeDescription()}',
+          trailing: const Icon(fluent_ui.FluentIcons.chevron_right, size: 12),
+          onTap: () => _showPlayerBackgroundDialog(),
+        ),
+        FluentSettingsTile(
+          icon: fluent_ui.FluentIcons.design,
+          title: '桌面主题样式',
+          subtitle: _getThemeFrameworkSubtitle(),
+          trailing: const Icon(fluent_ui.FluentIcons.chevron_right, size: 12),
+          onTap: () => _showThemeFrameworkDialog(),
+        ),
+        FluentSettingsTile(
+          icon: fluent_ui.FluentIcons.view_dashboard,
+          title: '布局模式',
+          subtitle: LayoutPreferenceService().getLayoutDescription(),
+          trailing: const Icon(fluent_ui.FluentIcons.chevron_right, size: 12),
+          onTap: () => _showLayoutModeDialog(),
         ),
       ],
     );
@@ -115,6 +198,15 @@ class _AppearanceSettingsState extends State<AppearanceSettings> {
       return '自动跟随系统主题色';
     } else {
       return '手动选择主题色';
+    }
+  }
+
+  String _getThemeFrameworkSubtitle() {
+    switch (ThemeManager().themeFramework) {
+      case ThemeFramework.material:
+        return 'Material Design 3（默认推荐）';
+      case ThemeFramework.fluent:
+        return 'Fluent UI（Windows 原生风格）';
     }
   }
 
@@ -348,16 +440,147 @@ class _AppearanceSettingsState extends State<AppearanceSettings> {
   }
 
   void _showPlayerBackgroundDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => PlayerBackgroundDialog(
-        onChanged: () {
-          if (mounted) {
-            setState(() {});
-          }
-        },
-      ),
-    );
+    final isFluentUI = Platform.isWindows && ThemeManager().isFluentFramework;
+    if (isFluentUI) {
+      fluent_ui.showDialog(
+        context: context,
+        builder: (context) => PlayerBackgroundDialog(
+          onChanged: () {
+            if (mounted) {
+              setState(() {});
+            }
+          },
+        ),
+      );
+    } else {
+      showDialog(
+        context: context,
+        builder: (context) => PlayerBackgroundDialog(
+          onChanged: () {
+            if (mounted) {
+              setState(() {});
+            }
+          },
+        ),
+      );
+    }
+  }
+
+  void _showThemeFrameworkDialog() {
+    final isFluentUI = Platform.isWindows && ThemeManager().isFluentFramework;
+    if (isFluentUI) {
+      fluent_ui.showDialog(
+        context: context,
+        builder: (context) => fluent_ui.ContentDialog(
+          title: const Text('选择桌面主题样式'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              fluent_ui.RadioButton(
+                content: const Text('Material Design 3'),
+                checked: ThemeManager().themeFramework == ThemeFramework.material,
+                onChanged: (v) {
+                  ThemeManager().setThemeFramework(ThemeFramework.material);
+                  Navigator.pop(context);
+                  if (mounted) setState(() {});
+                  final messenger = ScaffoldMessenger.maybeOf(context);
+                  if (messenger != null) {
+                    messenger.showSnackBar(
+                      const SnackBar(
+                        content: Text('已切换到 Material Design 3 样式'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  }
+                },
+              ),
+              const SizedBox(height: 8),
+              fluent_ui.RadioButton(
+                content: const Text('Fluent UI'),
+                checked: ThemeManager().themeFramework == ThemeFramework.fluent,
+                onChanged: (v) {
+                  ThemeManager().setThemeFramework(ThemeFramework.fluent);
+                  Navigator.pop(context);
+                  if (mounted) setState(() {});
+                  final messenger = ScaffoldMessenger.maybeOf(context);
+                  if (messenger != null) {
+                    messenger.showSnackBar(
+                      const SnackBar(
+                        content: Text('已切换到 Fluent UI 样式'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            fluent_ui.Button(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('关闭'),
+            ),
+          ],
+        ),
+      );
+    } else {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('选择桌面主题样式'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              RadioListTile<ThemeFramework>(
+                title: const Text('Material Design 3'),
+                subtitle: const Text('保持现有设计语言，适合跨平台体验'),
+                secondary: const Icon(Icons.layers_outlined),
+                value: ThemeFramework.material,
+                groupValue: ThemeManager().themeFramework,
+                onChanged: (value) {
+                  if (value == null) return;
+                  ThemeManager().setThemeFramework(value);
+                  Navigator.pop(context);
+                  if (mounted) setState(() {});
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('已切换到 Material Design 3 样式'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                },
+              ),
+              RadioListTile<ThemeFramework>(
+                title: const Text('Fluent UI'),
+                subtitle: const Text('与 Windows 11 外观保持一致'),
+                secondary: const Icon(Icons.desktop_windows),
+                value: ThemeFramework.fluent,
+                groupValue: ThemeManager().themeFramework,
+                onChanged: (value) {
+                  if (value == null) return;
+                  ThemeManager().setThemeFramework(value);
+                  Navigator.pop(context);
+                  if (mounted) setState(() {});
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('已切换到 Fluent UI 样式'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('关闭'),
+            ),
+          ],
+        ),
+      );
+    }
   }
 }
 

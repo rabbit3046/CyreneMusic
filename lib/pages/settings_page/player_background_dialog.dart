@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:fluent_ui/fluent_ui.dart' as fluent_ui;
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../services/player_background_service.dart';
+import '../../utils/theme_manager.dart';
 
 /// 播放器背景设置对话框
 class PlayerBackgroundDialog extends StatefulWidget {
@@ -19,6 +21,143 @@ class _PlayerBackgroundDialogState extends State<PlayerBackgroundDialog> {
   Widget build(BuildContext context) {
     final backgroundService = PlayerBackgroundService();
     final currentType = backgroundService.backgroundType;
+    final isFluent = Platform.isWindows && ThemeManager().isFluentFramework;
+
+    if (isFluent) {
+      return fluent_ui.ContentDialog(
+        title: const Text('播放器背景设置'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 自适应背景
+              fluent_ui.RadioButton(
+                content: const Text('自适应背景'),
+                checked: currentType == PlayerBackgroundType.adaptive,
+                onChanged: (v) async {
+                  await backgroundService.setBackgroundType(PlayerBackgroundType.adaptive);
+                  setState(() {});
+                  widget.onChanged();
+                },
+              ),
+              // 渐变开关（仅在自适应背景时显示）
+              if (currentType == PlayerBackgroundType.adaptive) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Expanded(child: Text('封面渐变效果')),
+                    fluent_ui.ToggleSwitch(
+                      checked: backgroundService.enableGradient,
+                      onChanged: (value) async {
+                        await backgroundService.setEnableGradient(value);
+                        setState(() {});
+                        widget.onChanged();
+                      },
+                    ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4.0),
+                  child: Text(
+                    Platform.isWindows || Platform.isMacOS || Platform.isLinux
+                        ? '专辑封面位于左侧，向右渐变到主题色'
+                        : '专辑封面位于顶部，向下渐变到主题色',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: 8),
+
+              // 纯色背景
+              fluent_ui.RadioButton(
+                content: const Text('纯色背景'),
+                checked: currentType == PlayerBackgroundType.solidColor,
+                onChanged: (v) async {
+                  await backgroundService.setBackgroundType(PlayerBackgroundType.solidColor);
+                  setState(() {});
+                  widget.onChanged();
+                },
+              ),
+              if (currentType == PlayerBackgroundType.solidColor) ...[
+                const SizedBox(height: 8),
+                fluent_ui.FilledButton(
+                  onPressed: _showSolidColorPicker,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.palette, color: backgroundService.solidColor),
+                      const SizedBox(width: 8),
+                      const Text('选择颜色'),
+                    ],
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: 8),
+
+              // 图片背景
+              fluent_ui.RadioButton(
+                content: Text(
+                  backgroundService.imagePath != null ? '图片背景（已设置）' : '图片背景',
+                ),
+                checked: currentType == PlayerBackgroundType.image,
+                onChanged: (v) async {
+                  await backgroundService.setBackgroundType(PlayerBackgroundType.image);
+                  setState(() {});
+                  widget.onChanged();
+                },
+              ),
+              if (currentType == PlayerBackgroundType.image) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: fluent_ui.FilledButton(
+                        onPressed: _selectBackgroundImage,
+                        child: const Text('选择图片'),
+                      ),
+                    ),
+                    if (backgroundService.imagePath != null) ...[
+                      const SizedBox(width: 8),
+                      fluent_ui.IconButton(
+                        icon: const Icon(fluent_ui.FluentIcons.clear),
+                        onPressed: () async {
+                          await backgroundService.clearImageBackground();
+                          setState(() {});
+                          widget.onChanged();
+                        },
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text('模糊程度: ${backgroundService.blurAmount.toStringAsFixed(0)}'),
+                fluent_ui.Slider(
+                  value: backgroundService.blurAmount,
+                  min: 0,
+                  max: 50,
+                  divisions: 50,
+                  onChanged: (value) async {
+                    await backgroundService.setBlurAmount(value);
+                    setState(() {});
+                    widget.onChanged();
+                  },
+                ),
+                const Text('0 = 清晰，50 = 最模糊', style: TextStyle(fontSize: 12)),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          fluent_ui.Button(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
+      );
+    }
 
     return AlertDialog(
       title: const Row(
@@ -200,83 +339,151 @@ class _PlayerBackgroundDialogState extends State<PlayerBackgroundDialog> {
     final backgroundService = PlayerBackgroundService();
     Color? selectedColor;
 
-    await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('选择纯色'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // 预设颜色
-              const Text(
-                '预设颜色',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  Colors.grey[900]!,
-                  Colors.black,
-                  Colors.blue[900]!,
-                  Colors.purple[900]!,
-                  Colors.red[900]!,
-                  Colors.green[900]!,
-                  Colors.orange[900]!,
-                  Colors.teal[900]!,
-                ].map((color) => InkWell(
-                  onTap: () {
-                    selectedColor = color;
-                    Navigator.pop(context);
-                  },
-                  child: Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: color,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: color == backgroundService.solidColor
-                            ? Theme.of(context).colorScheme.primary
-                            : Colors.transparent,
-                        width: 3,
+    final isFluent = Platform.isWindows && ThemeManager().isFluentFramework;
+
+    if (isFluent) {
+      await fluent_ui.showDialog(
+        context: context,
+        builder: (context) => fluent_ui.ContentDialog(
+          title: const Text('选择纯色'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('预设颜色'),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    Colors.grey[900]!,
+                    Colors.black,
+                    Colors.blue[900]!,
+                    Colors.purple[900]!,
+                    Colors.red[900]!,
+                    Colors.green[900]!,
+                    Colors.orange[900]!,
+                    Colors.teal[900]!,
+                  ].map((color) => GestureDetector(
+                    onTap: () {
+                      selectedColor = color;
+                      Navigator.pop(context);
+                    },
+                    child: Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: color,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: color == backgroundService.solidColor
+                              ? Colors.white.withOpacity(0.6)
+                              : Colors.transparent,
+                          width: 3,
+                        ),
                       ),
                     ),
-                  ),
-                )).toList(),
-              ),
-              
-              const SizedBox(height: 20),
-              
-              // 自定义颜色按钮
-              OutlinedButton.icon(
-                onPressed: () {
-                  Navigator.pop(context);
-                  _showCustomColorPicker();
-                },
-                icon: const Icon(Icons.palette),
-                label: const Text('自定义颜色'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  )).toList(),
                 ),
-              ),
-            ],
+                const SizedBox(height: 20),
+                fluent_ui.Button(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _showCustomColorPicker();
+                  },
+                  child: const Text('自定义颜色'),
+                ),
+              ],
+            ),
           ),
+          actions: [
+            fluent_ui.Button(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
+      );
+    } else {
+      await showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('选择纯色'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // 预设颜色
+                const Text(
+                  '预设颜色',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    Colors.grey[900]!,
+                    Colors.black,
+                    Colors.blue[900]!,
+                    Colors.purple[900]!,
+                    Colors.red[900]!,
+                    Colors.green[900]!,
+                    Colors.orange[900]!,
+                    Colors.teal[900]!,
+                  ].map((color) => InkWell(
+                    onTap: () {
+                      selectedColor = color;
+                      Navigator.pop(context);
+                    },
+                    child: Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: color,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: color == backgroundService.solidColor
+                              ? Theme.of(context).colorScheme.primary
+                              : Colors.transparent,
+                          width: 3,
+                        ),
+                      ),
+                    ),
+                  )).toList(),
+                ),
+                
+                const SizedBox(height: 20),
+                
+                // 自定义颜色按钮
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _showCustomColorPicker();
+                  },
+                  icon: const Icon(Icons.palette),
+                  label: const Text('自定义颜色'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ],
-      ),
-    );
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+          ],
+        ),
+      );
+    }
 
     if (selectedColor != null) {
       await backgroundService.setSolidColor(selectedColor!);
@@ -290,44 +497,86 @@ class _PlayerBackgroundDialogState extends State<PlayerBackgroundDialog> {
     final backgroundService = PlayerBackgroundService();
     Color pickerColor = backgroundService.solidColor;
 
-    await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('自定义颜色'),
-        content: SingleChildScrollView(
-          child: ColorPicker(
-            pickerColor: pickerColor,
-            onColorChanged: (color) {
-              pickerColor = color;
-            },
-            enableAlpha: false,
-            displayThumbColor: true,
-            pickerAreaHeightPercent: 0.8,
-            labelTypes: const [
-              ColorLabelType.rgb,
-              ColorLabelType.hsv,
-            ],
+    final isFluent = Platform.isWindows && ThemeManager().isFluentFramework;
+    if (isFluent) {
+      await fluent_ui.showDialog(
+        context: context,
+        builder: (context) => fluent_ui.ContentDialog(
+          title: const Text('自定义颜色'),
+          content: SingleChildScrollView(
+            child: ColorPicker(
+              pickerColor: pickerColor,
+              onColorChanged: (color) {
+                pickerColor = color;
+              },
+              enableAlpha: false,
+              displayThumbColor: true,
+              pickerAreaHeightPercent: 0.8,
+              labelTypes: const [
+                ColorLabelType.rgb,
+                ColorLabelType.hsv,
+              ],
+            ),
           ),
+          actions: [
+            fluent_ui.Button(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            fluent_ui.FilledButton(
+              onPressed: () async {
+                await backgroundService.setSolidColor(pickerColor);
+                setState(() {});
+                widget.onChanged();
+                if (mounted) {
+                  Navigator.pop(context);
+                }
+              },
+              child: const Text('确定'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
+      );
+    } else {
+      await showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('自定义颜色'),
+          content: SingleChildScrollView(
+            child: ColorPicker(
+              pickerColor: pickerColor,
+              onColorChanged: (color) {
+                pickerColor = color;
+              },
+              enableAlpha: false,
+              displayThumbColor: true,
+              pickerAreaHeightPercent: 0.8,
+              labelTypes: const [
+                ColorLabelType.rgb,
+                ColorLabelType.hsv,
+              ],
+            ),
           ),
-          TextButton(
-            onPressed: () async {
-              await backgroundService.setSolidColor(pickerColor);
-              setState(() {});
-              widget.onChanged();
-              if (mounted) {
-                Navigator.pop(context);
-              }
-            },
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    );
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () async {
+                await backgroundService.setSolidColor(pickerColor);
+                setState(() {});
+                widget.onChanged();
+                if (mounted) {
+                  Navigator.pop(context);
+                }
+              },
+              child: const Text('确定'),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   /// 选择背景图片

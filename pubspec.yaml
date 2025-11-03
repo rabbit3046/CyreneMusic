@@ -96,6 +96,9 @@ dependencies:
   # Dynamic color (Material You) support for Android 12+
   dynamic_color: ^1.7.0
 
+  # Fluent UI controls and theming for Windows
+  fluent_ui: ^4.11.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
