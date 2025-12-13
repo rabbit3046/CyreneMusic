@@ -2004,6 +2004,8 @@ class _HomePageState extends State<HomePage>
 }
 
 /// 首页顶部胶囊 Tabs（参考歌手详情页样式）
+/// Fluent UI 主题下使用 Win11 Pivot 风格（下划线指示器）
+/// Material Design 主题下使用胶囊滑动样式
 class _HomeCapsuleTabs extends StatelessWidget {
   final List<String> tabs;
   final int currentIndex;
@@ -2016,6 +2018,52 @@ class _HomeCapsuleTabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isFluent = ThemeManager().isFluentFramework;
+    
+    // Fluent UI 主题使用 Win11 Pivot 风格
+    if (isFluent) {
+      return _buildFluentPivotTabs(context);
+    }
+    
+    // Material Design / iOS 主题使用胶囊滑动样式
+    return _buildCapsuleTabs(context);
+  }
+  
+  /// Win11 风格的 Pivot Tab 栏
+  Widget _buildFluentPivotTabs(BuildContext context) {
+    final fluentTheme = fluent.FluentTheme.of(context);
+    final isLight = fluentTheme.brightness == Brightness.light;
+    final accentColor = fluentTheme.accentColor;
+    final textColor = fluentTheme.typography.body?.color ??
+        (isLight ? Colors.black : Colors.white);
+    final subtleTextColor = isLight 
+        ? Colors.black.withOpacity(0.6) 
+        : Colors.white.withOpacity(0.6);
+    
+    return SizedBox(
+      height: 40,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: List.generate(tabs.length, (i) {
+          final selected = i == currentIndex;
+          return Padding(
+            padding: EdgeInsets.only(right: i < tabs.length - 1 ? 8 : 0),
+            child: _FluentPivotTabItem(
+              label: tabs[i],
+              isSelected: selected,
+              accentColor: accentColor,
+              selectedTextColor: textColor,
+              unselectedTextColor: subtleTextColor,
+              onTap: () => onChanged(i),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+  
+  /// Material Design / iOS 胶囊滑动样式
+  Widget _buildCapsuleTabs(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final bg = cs.surfaceContainerHighest;
     final pillColor = cs.primary;
@@ -2097,6 +2145,105 @@ class _HomeCapsuleTabs extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// Win11 风格的 Pivot Tab 单项
+class _FluentPivotTabItem extends StatefulWidget {
+  final String label;
+  final bool isSelected;
+  final Color accentColor;
+  final Color selectedTextColor;
+  final Color unselectedTextColor;
+  final VoidCallback onTap;
+
+  const _FluentPivotTabItem({
+    required this.label,
+    required this.isSelected,
+    required this.accentColor,
+    required this.selectedTextColor,
+    required this.unselectedTextColor,
+    required this.onTap,
+  });
+
+  @override
+  State<_FluentPivotTabItem> createState() => _FluentPivotTabItemState();
+}
+
+class _FluentPivotTabItemState extends State<_FluentPivotTabItem> {
+  bool _isHovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = fluent.FluentTheme.of(context).brightness == Brightness.light;
+    
+    // 计算当前文字颜色
+    Color textColor;
+    if (widget.isSelected) {
+      textColor = widget.selectedTextColor;
+    } else if (_isHovering) {
+      textColor = widget.selectedTextColor.withOpacity(0.8);
+    } else {
+      textColor = widget.unselectedTextColor;
+    }
+    
+    // 计算下划线颜色和宽度
+    final indicatorColor = widget.isSelected ? widget.accentColor : Colors.transparent;
+    final indicatorWidth = widget.isSelected ? 20.0 : 0.0;
+    
+    // hover 背景色
+    final hoverBg = _isHovering && !widget.isSelected
+        ? (isLight ? Colors.black.withOpacity(0.04) : Colors.white.withOpacity(0.04))
+        : Colors.transparent;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovering = true),
+      onExit: (_) => setState(() => _isHovering = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+            color: hoverBg,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // 文字
+              AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 150),
+                curve: Curves.easeOutCubic,
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 13,
+                  fontWeight: widget.isSelected ? FontWeight.w600 : FontWeight.w500,
+                  fontFamily: 'Microsoft YaHei',
+                ),
+                child: Text(widget.label),
+              ),
+              const SizedBox(height: 2),
+              // 下划线指示器
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutCubic,
+                width: indicatorWidth,
+                height: 2.5,
+                decoration: BoxDecoration(
+                  color: indicatorColor,
+                  borderRadius: BorderRadius.circular(1.25),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
