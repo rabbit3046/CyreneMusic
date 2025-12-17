@@ -13,6 +13,29 @@ auto bdw = bitsdojo_window_configure(BDW_CUSTOM_FRAME | BDW_HIDE_ON_STARTUP);
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  // Ensure only one instance is running
+  const wchar_t kUniqueMutexName[] = L"Local\\CyreneMusicInstanceMutex";
+  HANDLE mutex = CreateMutex(nullptr, TRUE, kUniqueMutexName);
+  (void)mutex;
+  if (GetLastError() == ERROR_ALREADY_EXISTS) {
+    HWND existing_window = FindWindow(L"CyreneMusicWindow", nullptr);
+    if (existing_window) {
+      // If the window is hidden (e.g., minimized to tray), show it first
+      if (!IsWindowVisible(existing_window)) {
+        ShowWindow(existing_window, SW_SHOW);
+      }
+      
+      // If minimized, restore it
+      if (IsIconic(existing_window)) {
+        ShowWindow(existing_window, SW_RESTORE);
+      }
+      
+      // Bring to foreground
+      SetForegroundWindow(existing_window);
+    }
+    return EXIT_SUCCESS;
+  }
+
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
