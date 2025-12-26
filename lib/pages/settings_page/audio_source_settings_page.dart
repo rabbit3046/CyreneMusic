@@ -255,11 +255,16 @@ class _AudioSourceSettingsContentState
         apiUrl: config.apiUrl,
         apiKey: config.apiKey,
         scriptSource: scriptUrl,
+        scriptContent: config.scriptContent,
+        author: config.author,
+        description: config.description,
         urlPathTemplate: config.urlPathTemplate,
       );
 
       // 检查是否需要用户手动输入 API Key
-      final needsApiKey = config.apiKey.isEmpty;
+      // 如果有脚本内容（运行时模式），通常不需要手动输入 API Key
+      // 只有在没有脚本内容（旧版直连模式）且 API Key 为空时才需要
+      final needsApiKey = config.apiKey.isEmpty && config.scriptContent.isEmpty;
 
       setState(() {
         _importResult = '导入成功：${config.name} v${config.version}';
@@ -319,11 +324,15 @@ class _AudioSourceSettingsContentState
         apiUrl: config.apiUrl,
         apiKey: config.apiKey,
         scriptSource: config.source,
+        scriptContent: config.scriptContent,
+        author: config.author,
+        description: config.description,
         urlPathTemplate: config.urlPathTemplate,
       );
 
       // 检查是否需要用户手动输入 API Key
-      final needsApiKey = config.apiKey.isEmpty;
+      // 如果有脚本内容（运行时模式），通常不需要手动输入 API Key
+      final needsApiKey = config.apiKey.isEmpty && config.scriptContent.isEmpty;
 
       setState(() {
         _importResult = '导入成功：${config.name} v${config.version}';
@@ -478,16 +487,71 @@ class _AudioSourceSettingsContentState
         const SizedBox(height: 24),
 
         // 当前配置状态
-        if (_audioSourceService.isConfigured)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 16),
-            child: fluent.InfoBar(
-              title: Text(_audioSourceService.sourceType == AudioSourceType.lxmusic
-                  ? '已配置：${_audioSourceService.lxSourceName} v${_audioSourceService.lxSourceVersion}'
-                  : '已配置：${_audioSourceService.sourceUrl}'),
-              severity: fluent.InfoBarSeverity.success,
+        if (_audioSourceService.isConfigured) ...[
+          // 洛雪音源：显示详细信息卡片
+          if (_audioSourceService.sourceType == AudioSourceType.lxmusic)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 24),
+              child: fluent.Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(fluent.FluentIcons.music_note, color: theme.accentColor),
+                          const SizedBox(width: 8),
+                          Text(
+                            _audioSourceService.lxSourceName,
+                            style: theme.typography.subtitle,
+                          ),
+                          const SizedBox(width: 8),
+                          fluent.Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: theme.accentColor.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'v${_audioSourceService.lxSourceVersion}',
+                              style: theme.typography.caption?.copyWith(
+                                color: theme.accentColor,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_audioSourceService.lxSourceAuthor.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          '作者: ${_audioSourceService.lxSourceAuthor}',
+                          style: theme.typography.caption,
+                        ),
+                      ],
+                       if (_audioSourceService.lxSourceDescription.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          _audioSourceService.lxSourceDescription,
+                          style: theme.typography.body,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            )
+          else
+            // 其他音源：显示简单的 InfoBar
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: fluent.InfoBar(
+                title: Text('已配置：${_audioSourceService.sourceUrl}'),
+                severity: fluent.InfoBarSeverity.success,
+              ),
             ),
-          ),
+        ],
 
         // 音源类型选择
         Text('音源类型', style: theme.typography.subtitle),

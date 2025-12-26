@@ -175,15 +175,26 @@ class _AudioSourceSettingsState extends State<AudioSourceSettings> {
         apiUrl: config.apiUrl,
         apiKey: config.apiKey,
         scriptSource: scriptUrl,
+        scriptContent: config.scriptContent,
+        author: config.author,
+        description: config.description,
         urlPathTemplate: config.urlPathTemplate,
       );
+
+      // 检查是否需要用户手动输入 API Key
+      // 如果有脚本内容（运行时模式），通常不需要手动输入 API Key
+      final needsApiKey = config.apiKey.isEmpty && config.scriptContent.isEmpty;
 
       setState(() {
         _importResult = '导入成功：${config.name} v${config.version}';
         _importSuccess = true;
       });
 
-      _showMessage('洛雪音源脚本导入成功');
+      if (needsApiKey) {
+        _showMessage('洛雪音源导入成功，请输入 API Key');
+      } else {
+        _showMessage('洛雪音源脚本导入成功');
+      }
     } catch (e) {
       setState(() {
         _importResult = '导入失败：$e';
@@ -230,8 +241,15 @@ class _AudioSourceSettingsState extends State<AudioSourceSettings> {
         apiUrl: config.apiUrl,
         apiKey: config.apiKey,
         scriptSource: config.source,
+        scriptContent: config.scriptContent,
+        author: config.author,
+        description: config.description,
         urlPathTemplate: config.urlPathTemplate,
       );
+
+      // 检查是否需要用户手动输入 API Key
+      // 如果有脚本内容（运行时模式），通常不需要手动输入 API Key
+      final needsApiKey = config.apiKey.isEmpty && config.scriptContent.isEmpty;
 
       setState(() {
         _importResult = '导入成功：${config.name} v${config.version}';
@@ -239,7 +257,11 @@ class _AudioSourceSettingsState extends State<AudioSourceSettings> {
         _lxScriptUrlController.text = config.source;
       });
 
-      _showMessage('洛雪音源脚本导入成功');
+      if (needsApiKey) {
+        _showMessage('洛雪音源导入成功，请输入 API Key');
+      } else {
+        _showMessage('洛雪音源脚本导入成功');
+      }
     } catch (e) {
       setState(() {
         _importResult = '导入失败：$e';
@@ -350,8 +372,18 @@ class _AudioSourceSettingsState extends State<AudioSourceSettings> {
                 padding: const EdgeInsets.only(bottom: 16),
                 child: fluent.InfoBar(
                   title: Text(_audioSourceService.sourceType == AudioSourceType.lxmusic
-                      ? '已配置：${_audioSourceService.lxSourceName} v${_audioSourceService.lxSourceVersion}'
+                      ? '已配置：${_audioSourceService.lxSourceName}'
                       : '已配置：${_audioSourceService.sourceUrl}'),
+                  content: _audioSourceService.sourceType == AudioSourceType.lxmusic
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('版本: ${_audioSourceService.lxSourceVersion}'),
+                            const SizedBox(height: 4),
+                            Text('API URL: ${_audioSourceService.baseUrl}'),
+                          ],
+                        )
+                      : null,
                   severity: fluent.InfoBarSeverity.success,
                 ),
               ),

@@ -1,7 +1,11 @@
+import 'dart:io';
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path_provider/path_provider.dart';
 import '../models/track.dart';
 import '../models/song_detail.dart';
+import 'lx_music_runtime_service.dart';
 
 /// 音源类型枚举
 enum AudioSourceType {
@@ -37,6 +41,12 @@ class AudioSourceService extends ChangeNotifier {
   /// 洛雪音源版本（从脚本解析）
   String _lxSourceVersion = '';
 
+  /// 洛雪音源作者
+  String _lxSourceAuthor = '';
+
+  /// 洛雪音源描述
+  String _lxSourceDescription = '';
+
   /// 洛雪音源脚本来源（URL 或文件名）
   String _lxScriptSource = '';
   
@@ -53,6 +63,8 @@ class AudioSourceService extends ChangeNotifier {
   static const String _keyLxApiKey = 'audio_source_lx_api_key';
   static const String _keyLxSourceName = 'audio_source_lx_name';
   static const String _keyLxSourceVersion = 'audio_source_lx_version';
+  static const String _keyLxSourceAuthor = 'audio_source_lx_author';
+  static const String _keyLxSourceDescription = 'audio_source_lx_description';
   static const String _keyLxScriptSource = 'audio_source_lx_script_source';
   static const String _keyLxUrlPathTemplate = 'audio_source_lx_url_path_template';
 
@@ -90,8 +102,38 @@ class AudioSourceService extends ChangeNotifier {
     }
 
     await _loadSettings();
+
+    // 如果是洛雪音源，初始化运行时
+    if (_sourceType == AudioSourceType.lxmusic) {
+      // 不等待初始化完成，以免阻塞启动
+      initializeLxRuntime();
+    }
+
     _isInitialized = true;
     print('✅ [AudioSourceService] 初始化完成');
+  }
+
+  /// 初始化洛雪运行时环境
+  Future<void> initializeLxRuntime() async {
+    if (_sourceType != AudioSourceType.lxmusic) return;
+    
+    try {
+      print('🚀 [AudioSourceService] 正在初始化洛雪运行时...');
+      final scriptContent = await _loadLxScriptContent();
+      
+      if (scriptContent != null && scriptContent.isNotEmpty) {
+        final runtime = LxMusicRuntimeService();
+        if (!runtime.isInitialized) {
+          await runtime.initialize();
+        }
+        await runtime.loadScript(scriptContent);
+        print('✅ [AudioSourceService] 洛雪运行时初始化成功');
+      } else {
+        print('⚠️ [AudioSourceService] 未找到洛雪脚本内容，无法初始化运行时');
+      }
+    } catch (e) {
+      print('❌ [AudioSourceService] 初始化洛雪运行时失败: $e');
+    }
   }
 
   /// 从本地存储加载设置
@@ -114,6 +156,11 @@ class AudioSourceService extends ChangeNotifier {
       // 加载洛雪音源脚本信息
       _lxSourceName = prefs.getString(_keyLxSourceName) ?? '';
       _lxSourceVersion = prefs.getString(_keyLxSourceVersion) ?? '';
+      _lxScriptSource = prefs.getString(_keyLxScriptSource) ?? '';
+      _lxSourceName = prefs.getString(_keyLxSourceName) ?? '';
+      _lxSourceVersion = prefs.getString(_keyLxSourceVersion) ?? '';
+      _lxSourceAuthor = prefs.getString(_keyLxSourceAuthor) ?? '';
+      _lxSourceDescription = prefs.getString(_keyLxSourceDescription) ?? '';
       _lxScriptSource = prefs.getString(_keyLxScriptSource) ?? '';
       _lxUrlPathTemplate = prefs.getString(_keyLxUrlPathTemplate) ?? '';
 
@@ -173,6 +220,11 @@ class AudioSourceService extends ChangeNotifier {
       await prefs.setString(_keyLxSourceName, _lxSourceName);
       await prefs.setString(_keyLxSourceVersion, _lxSourceVersion);
       await prefs.setString(_keyLxScriptSource, _lxScriptSource);
+      await prefs.setString(_keyLxSourceName, _lxSourceName);
+      await prefs.setString(_keyLxSourceVersion, _lxSourceVersion);
+      await prefs.setString(_keyLxSourceAuthor, _lxSourceAuthor);
+      await prefs.setString(_keyLxSourceDescription, _lxSourceDescription);
+      await prefs.setString(_keyLxScriptSource, _lxScriptSource);
       await prefs.setString(_keyLxUrlPathTemplate, _lxUrlPathTemplate);
       print('💾 [AudioSourceService] 洛雪脚本信息已保存');
     } catch (e) {
@@ -197,18 +249,46 @@ class AudioSourceService extends ChangeNotifier {
   /// 获取洛雪音源版本
   String get lxSourceVersion => _lxSourceVersion;
 
+  /// 获取洛雪音源作者
+  String get lxSourceAuthor => _lxSourceAuthor;
+
+  /// 获取洛雪音源描述
+  String get lxSourceDescription => _lxSourceDescription;
+
   /// 获取洛雪脚本来源
   String get lxScriptSource => _lxScriptSource;
 
   /// 音源是否已配置
   bool get isConfigured => _sourceUrl.isNotEmpty;
 
-  /// 获取音源基础 URL（移除末尾斜杠）
+  /// 获取音源基础 URL（移除末尾斜杠和可能错误包含的引号）
   String get baseUrl {
     if (_sourceUrl.isEmpty) return '';
-    return _sourceUrl.endsWith('/') 
-        ? _sourceUrl.substring(0, _sourceUrl.length - 1) 
-        : _sourceUrl;
+    
+    // 清理 URL：移除首尾的引号和末尾的斜杠
+    String cleanUrl = _cleanUrl(_sourceUrl);
+    
+    return cleanUrl;
+  }
+
+  /// 清理 URL，移除首尾引号和末尾斜杠
+  String _cleanUrl(String url) {
+    String result = url.trim();
+    
+    // 移除首尾单引号
+    while (result.startsWith("'") || result.startsWith('"')) {
+      result = result.substring(1);
+    }
+    while (result.endsWith("'") || result.endsWith('"')) {
+      result = result.substring(0, result.length - 1);
+    }
+    
+    // 移除末尾斜杠
+    if (result.endsWith('/')) {
+      result = result.substring(0, result.length - 1);
+    }
+    
+    return result;
   }
 
   // ==================== Setters ====================
@@ -225,10 +305,8 @@ class AudioSourceService extends ChangeNotifier {
 
   /// 设置音源 URL
   void setSourceUrl(String url) {
-    // 清理 URL
-    final cleanUrl = url.trim().endsWith('/')
-        ? url.trim().substring(0, url.trim().length - 1)
-        : url.trim();
+    // 使用 _cleanUrl 方法清理 URL
+    final cleanUrl = _cleanUrl(url);
 
     if (_sourceUrl != cleanUrl) {
       _sourceUrl = cleanUrl;
@@ -273,22 +351,30 @@ class AudioSourceService extends ChangeNotifier {
     required String apiUrl,
     required String apiKey,
     required String scriptSource,
+    required String scriptContent,
     String? urlPathTemplate,
+    String author = '',
+    String description = '',
   }) {
     print('🎵 [AudioSourceService] 导入洛雪音源脚本:');
     print('   名称: $name');
     print('   版本: $version');
+    print('   作者: ${author.isEmpty ? "未找到" : author}');
+    print('   描述: ${description.isEmpty ? "未找到" : description}');
     print('   API URL: $apiUrl');
     print('   路径模板: ${urlPathTemplate ?? "(默认)"}');
     print('   来源: $scriptSource');
 
     _sourceType = AudioSourceType.lxmusic;
-    _sourceUrl = apiUrl.trim().endsWith('/') 
-        ? apiUrl.trim().substring(0, apiUrl.trim().length - 1)
-        : apiUrl.trim();
+    
+    // 使用 _cleanUrl 方法清理 URL (如果 apiUrl 为空，则保持为空)
+    _sourceUrl = apiUrl.isNotEmpty ? _cleanUrl(apiUrl) : '';
+    
     _lxApiKey = apiKey.trim();
     _lxSourceName = name;
     _lxSourceVersion = version;
+    _lxSourceAuthor = author;
+    _lxSourceDescription = description;
     _lxScriptSource = scriptSource;
     _lxUrlPathTemplate = urlPathTemplate ?? '';
 
@@ -296,9 +382,39 @@ class AudioSourceService extends ChangeNotifier {
     _saveSourceUrl();
     _saveLxApiKey();
     _saveLxScriptInfo();
+    _saveLxScriptContent(scriptContent); // 保存脚本内容
     
     notifyListeners();
     print('✅ [AudioSourceService] 洛雪音源配置完成');
+    
+    // 立即初始化运行时
+    initializeLxRuntime();
+  }
+
+  /// 保存洛雪脚本内容到文件
+  Future<void> _saveLxScriptContent(String content) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/lx_source_script.js');
+      await file.writeAsString(content);
+      print('💾 [AudioSourceService] 洛雪脚本内容已保存到文件');
+    } catch (e) {
+      print('❌ [AudioSourceService] 保存脚本内容失败: $e');
+    }
+  }
+
+  /// 从文件读取洛雪脚本内容
+  Future<String?> _loadLxScriptContent() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/lx_source_script.js');
+      if (await file.exists()) {
+        return await file.readAsString();
+      }
+    } catch (e) {
+      print('❌ [AudioSourceService] 读取脚本内容失败: $e');
+    }
+    return null;
   }
 
   /// 清除音源配置
@@ -307,6 +423,8 @@ class AudioSourceService extends ChangeNotifier {
     _lxApiKey = '';
     _lxSourceName = '';
     _lxSourceVersion = '';
+    _lxSourceAuthor = '';
+    _lxSourceDescription = '';
     _lxScriptSource = '';
     _lxUrlPathTemplate = '';
     _saveSourceUrl();
