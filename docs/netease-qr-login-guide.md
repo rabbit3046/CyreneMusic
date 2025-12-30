@@ -82,15 +82,6 @@ GET https://music.163.com/api/login/qrcode/create?key={unikey}&qrimg=true&timest
 }
 ```
 
-**手动生成二维码**
-
-如果不使用 `qrimg=true`，可以自行生成二维码，内容为：
-```
-https://music.163.com/login?codekey={unikey}
-```
-
----
-
 ### 3. 检查扫码状态
 
 **请求**

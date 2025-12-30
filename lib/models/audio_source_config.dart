@@ -18,6 +18,10 @@ class AudioSourceConfig {
   /// API Key (optional)
   final String apiKey;
   
+  /// 支持的搜索平台列表
+  /// 可选值: 'netease', 'apple', 'qq', 'kugou', 'kuwo'
+  final List<String> supportedPlatforms;
+  
   // --- LxMusic Specific Fields ---
   final String version;
   final String author;
@@ -32,6 +36,7 @@ class AudioSourceConfig {
     required this.name,
     required this.url,
     this.apiKey = '',
+    this.supportedPlatforms = const [],
     this.version = '',
     this.author = '',
     this.description = '',
@@ -46,6 +51,7 @@ class AudioSourceConfig {
     String? name,
     String? url,
     String? apiKey,
+    List<String>? supportedPlatforms,
     String? version,
     String? author,
     String? description,
@@ -59,6 +65,7 @@ class AudioSourceConfig {
       name: name ?? this.name,
       url: url ?? this.url,
       apiKey: apiKey ?? this.apiKey,
+      supportedPlatforms: supportedPlatforms ?? this.supportedPlatforms,
       version: version ?? this.version,
       author: author ?? this.author,
       description: description ?? this.description,
@@ -76,6 +83,7 @@ class AudioSourceConfig {
       'name': name,
       'url': url,
       'apiKey': apiKey,
+      'supportedPlatforms': supportedPlatforms,
       'version': version,
       'author': author,
       'description': description,
@@ -93,6 +101,9 @@ class AudioSourceConfig {
       name: json['name'] as String,
       url: json['url'] as String,
       apiKey: json['apiKey'] as String? ?? '',
+      supportedPlatforms: (json['supportedPlatforms'] as List<dynamic>?)
+          ?.map((e) => e as String)
+          .toList() ?? [],
       version: json['version'] as String? ?? '',
       author: json['author'] as String? ?? '',
       description: json['description'] as String? ?? '',

@@ -46,6 +46,9 @@ class LxMusicRuntimeService {
   
   /// 请求计数器
   int _requestCounter = 0;
+  
+  /// 脚本初始化时解析的支持音源列表（临时保存）
+  List<String> _pendingSupportedSources = [];
 
   // ==================== Getters ====================
   
@@ -159,13 +162,16 @@ class LxMusicRuntimeService {
         window.__lx_reset__();
       ''');
 
-      // 3. 注入脚本信息
+      // 3. 注入脚本信息（包含完整脚本内容用于 rawScript）
+      // 将脚本内容进行 Base64 编码以避免 JSON 转义问题
+      final scriptBase64 = base64Encode(utf8.encode(scriptContent));
       final scriptInfoJson = jsonEncode({
         'name': scriptInfo.name,
         'version': scriptInfo.version,
         'author': scriptInfo.author,
         'description': scriptInfo.description,
         'homepage': scriptInfo.homepage,
+        'scriptBase64': scriptBase64,  // 完整脚本内容的 Base64 编码
       });
       
       await _webViewController?.evaluateJavascript(source: '''
@@ -196,9 +202,21 @@ class LxMusicRuntimeService {
         }
       }
 
-      _currentScript = scriptInfo;
+      // 6. 用从 lxOnInited 获取的支持音源更新 scriptInfo
+      final updatedScriptInfo = LxScriptInfo(
+        name: scriptInfo.name,
+        version: scriptInfo.version,
+        author: scriptInfo.author,
+        description: scriptInfo.description,
+        homepage: scriptInfo.homepage,
+        script: scriptInfo.script,
+        supportedSources: _pendingSupportedSources,
+      );
+      
+      _currentScript = updatedScriptInfo;
       print('✅ [LxMusicRuntime] 脚本加载成功');
-      return scriptInfo;
+      print('   支持的平台: ${updatedScriptInfo.supportedPlatforms}');
+      return updatedScriptInfo;
     } catch (e) {
       print('❌ [LxMusicRuntime] 脚本加载失败: $e');
       return null;
@@ -296,7 +314,13 @@ class LxMusicRuntimeService {
         print('✅ [LxMusicRuntime] 脚本初始化完成');
         if (args.isNotEmpty) {
           final data = args[0];
-          print('   支持的音源: ${data['sources']?.keys.toList()}');
+          final sources = data['sources'];
+          if (sources != null && sources is Map) {
+            _pendingSupportedSources = sources.keys.map((k) => k.toString()).toList();
+            print('   支持的音源: $_pendingSupportedSources');
+          } else {
+            _pendingSupportedSources = [];
+          }
         }
         _isScriptReady = true;
         return null;
@@ -411,6 +435,18 @@ class LxMusicRuntimeService {
     Map<String, dynamic> options,
   ) async {
     try {
+      // ===== 详细调试日志：打印脚本传入的原始 options =====
+      print('========== [HTTP Request Debug] ==========');
+      print('🔍 [HTTP] 原始 URL: $url');
+      print('🔍 [HTTP] 原始 options: $options');
+      if (options['headers'] != null) {
+        print('🔍 [HTTP] 原始 headers: ${options['headers']}');
+        print('🔍 [HTTP] headers 类型: ${options['headers'].runtimeType}');
+      } else {
+        print('🔍 [HTTP] 原始 headers: (null - 脚本未传递请求头)');
+      }
+      print('==========================================');
+      
       final method = (options['method'] as String?)?.toUpperCase() ?? 'GET';
       final headers = <String, String>{};
       
@@ -429,15 +465,35 @@ class LxMusicRuntimeService {
         headers['User-Agent'] = 'lx-music-request';
       }
       
+      // ===== 修正请求头以匹配解密脚本格式 =====
+      // 1. 添加缺失的 accept 头（如果脚本没有传递）
+      if (!headers.containsKey('accept') && !headers.containsKey('Accept')) {
+        headers['accept'] = 'application/json';
+      }
+      
+      // 2. 对于 GET 请求，移除不必要的 Content-Type（GET 请求不应该有 Content-Type）
+      if (method == 'GET') {
+        headers.remove('Content-Type');
+        headers.remove('content-type');
+      }
+      
+      // 3. 统一请求头的 key 为小写格式（与解密脚本一致）
+      final normalizedHeaders = <String, String>{};
+      headers.forEach((key, value) {
+        // 将 User-Agent 转为 user-agent，X-Request-Key 转为 x-request-key
+        normalizedHeaders[key.toLowerCase()] = value;
+      });
+      
       print('🌐 [HTTP] $method $url');
-      print('   Headers: $headers');
+      print('   Headers (原始): $headers');
+      print('   Headers (规范化): $normalizedHeaders');
       
       http.Response response;
       
       if (method == 'GET') {
         response = await http.get(
           Uri.parse(url),
-          headers: headers,
+          headers: normalizedHeaders,
         ).timeout(const Duration(seconds: 30));
       } else if (method == 'POST') {
         // 解析请求体
@@ -460,13 +516,13 @@ class LxMusicRuntimeService {
           }
         }
         
-        if (contentType != null && !headers.containsKey('Content-Type')) {
-          headers['Content-Type'] = contentType;
+        if (contentType != null && !normalizedHeaders.containsKey('content-type')) {
+          normalizedHeaders['content-type'] = contentType;
         }
         
         response = await http.post(
           Uri.parse(url),
-          headers: headers,
+          headers: normalizedHeaders,
           body: body,
         ).timeout(const Duration(seconds: 30));
       } else {
@@ -579,6 +635,31 @@ class LxMusicRuntimeService {
   // HTTP 请求实现
   function request(url, options, callback) {
     const requestId = 'http_' + (++httpRequestCounter) + '_' + Date.now();
+    
+    // ===== 详细调试日志 =====
+    console.log('========== [LxMusic Request Debug] ==========');
+    console.log('[LxMusic] Request URL: ' + url);
+    console.log('[LxMusic] Request Method: ' + ((options && options.method) || 'GET'));
+    if (options && options.headers) {
+      console.log('[LxMusic] Request Headers: ' + JSON.stringify(options.headers));
+    } else {
+      console.log('[LxMusic] Request Headers: (none)');
+    }
+    if (options && options.body) {
+      console.log('[LxMusic] Request Body: ' + JSON.stringify(options.body));
+    }
+    // 尝试解析 URL 中的 sign 参数
+    try {
+      const urlObj = new URL(url);
+      const sign = urlObj.searchParams.get('sign');
+      if (sign) {
+        console.log('[LxMusic] Sign Parameter: ' + sign);
+        console.log('[LxMusic] Sign Length: ' + sign.length);
+      }
+    } catch (e) {
+      console.log('[LxMusic] URL Parse Error: ' + e.message);
+    }
+    console.log('==============================================');
     
     pendingHttpRequests.set(requestId, callback);
     
@@ -825,7 +906,7 @@ class LxMusicRuntimeService {
     on: on,
     utils: utils,
     version: '2.0.0',
-    env: 'mobile',
+    env: 'desktop',  // 使用 desktop 环境标识以匹配洛雪桌面端
     currentScriptInfo: {
       name: '',
       version: '',
@@ -849,13 +930,23 @@ class LxMusicRuntimeService {
   // 设置脚本信息
   window.__lx_setScriptInfo__ = function(info) {
     currentScriptInfo = info;
+    // 解码 Base64 编码的脚本内容
+    let rawScript = '';
+    if (info.scriptBase64) {
+      try {
+        rawScript = atob(info.scriptBase64);
+        console.log('[LxMusic] rawScript 已设置，长度: ' + rawScript.length);
+      } catch (e) {
+        console.warn('[LxMusic] Base64 解码失败: ' + e.message);
+      }
+    }
     window.lx.currentScriptInfo = {
       name: info.name || '',
       version: info.version || '',
       author: info.author || '',
       description: info.description || '',
       homepage: info.homepage || '',
-      rawScript: '',
+      rawScript: rawScript,
     };
     console.log('[LxMusic] Script info set:', info.name);
   };
@@ -939,6 +1030,54 @@ class LxMusicRuntimeService {
   });
   
   console.log('[LxMusic] Sandbox initialized');
+  
+  // ==================== 调试函数 ====================
+  // 检查脚本加载后的关键全局变量
+  window.__lx_debugGlobals__ = function() {
+    console.log('========== [LxMusic Global Variables Debug] ==========');
+    
+    // 检查可能的签名相关变量
+    const varNames = ['API_URL', 'API_KEY', 'SECRET_KEY', 'SCRIPT_MD5', 'version', 
+                      'DEV_ENABLE', 'UPDATE_ENABLE', 'MUSIC_SOURCE'];
+    
+    varNames.forEach(function(name) {
+      if (typeof window[name] !== 'undefined') {
+        const val = window[name];
+        const display = typeof val === 'object' ? JSON.stringify(val) : String(val);
+        console.log('[LxMusic] window.' + name + ' = ' + display.substring(0, 200));
+      }
+    });
+    
+    // 检查 globalThis
+    varNames.forEach(function(name) {
+      if (typeof globalThis !== 'undefined' && typeof globalThis[name] !== 'undefined' && globalThis[name] !== window[name]) {
+        const val = globalThis[name];
+        const display = typeof val === 'object' ? JSON.stringify(val) : String(val);
+        console.log('[LxMusic] globalThis.' + name + ' = ' + display.substring(0, 200));
+      }
+    });
+    
+    // 检查 MUSIC_SOURCE 导出模块
+    if (window.MUSIC_SOURCE) {
+      console.log('[LxMusic] MUSIC_SOURCE module found:');
+      const ms = window.MUSIC_SOURCE;
+      if (ms.API_URL) console.log('[LxMusic]   API_URL = ' + ms.API_URL);
+      if (ms.API_KEY) console.log('[LxMusic]   API_KEY = ' + ms.API_KEY);
+      if (ms.SECRET_KEY) console.log('[LxMusic]   SECRET_KEY = ' + (ms.SECRET_KEY ? ms.SECRET_KEY.substring(0, 10) + '...' : 'undefined'));
+      if (ms.SCRIPT_MD5) console.log('[LxMusic]   SCRIPT_MD5 = ' + ms.SCRIPT_MD5);
+      if (ms.generateSign) console.log('[LxMusic]   generateSign = function');
+      if (ms.sha256) console.log('[LxMusic]   sha256 = function');
+    }
+    
+    console.log('========================================================');
+  };
+  
+  // 在脚本执行 500ms 后自动检查全局变量
+  setTimeout(function() {
+    if (isInited) {
+      window.__lx_debugGlobals__();
+    }
+  }, 500);
 })();
 </script>
 </body>
@@ -955,6 +1094,9 @@ class LxScriptInfo {
   final String description;
   final String homepage;
   final String script;
+  
+  /// 洛雪格式的支持音源列表 (wy, tx, kg, kw, mg)
+  final List<String> supportedSources;
 
   LxScriptInfo({
     required this.name,
@@ -963,8 +1105,36 @@ class LxScriptInfo {
     this.description = '',
     this.homepage = '',
     required this.script,
+    this.supportedSources = const [],
   });
+  
+  /// 将洛雪格式的音源代码转换为应用内部平台代码
+  static String? _lxToInternalPlatform(String lxSource) {
+    switch (lxSource) {
+      case 'wy':
+        return 'netease';
+      case 'tx':
+        return 'qq';
+      case 'kg':
+        return 'kugou';
+      case 'kw':
+        return 'kuwo';
+      case 'mg':
+        return null; // 咪咕暂不支持搜索
+      default:
+        return null;
+    }
+  }
+  
+  /// 获取应用内部格式的支持平台列表
+  List<String> get supportedPlatforms {
+    return supportedSources
+        .map((s) => _lxToInternalPlatform(s))
+        .where((p) => p != null)
+        .cast<String>()
+        .toList();
+  }
 
   @override
-  String toString() => 'LxScriptInfo(name: $name, version: $version)';
+  String toString() => 'LxScriptInfo(name: $name, version: $version, sources: $supportedSources)';
 }

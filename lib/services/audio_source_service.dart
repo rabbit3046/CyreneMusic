@@ -68,6 +68,13 @@ class AudioSourceService extends ChangeNotifier {
 
   static const List<String> tuneHubQualityOptions = ['128k', '320k', 'flac', 'flac24bit'];
 
+  /// 各音源类型默认支持的搜索平台
+  static const Map<AudioSourceType, List<String>> defaultSupportedPlatforms = {
+    AudioSourceType.omniparse: ['netease', 'qq', 'kugou', 'kuwo', 'apple'],
+    AudioSourceType.tunehub: ['netease', 'qq', 'kuwo'],
+    AudioSourceType.lxmusic: [], // 动态从脚本获取
+  };
+
   /// 初始化服务
   Future<void> initialize() async {
     if (_isInitialized) return;
@@ -312,6 +319,34 @@ class AudioSourceService extends ChangeNotifier {
   String get lxScriptSource => activeSource?.scriptSource ?? '';
   
   bool get isConfigured => activeSource != null;
+
+  /// 获取当前活动音源支持的搜索平台列表
+  List<String> get currentSupportedPlatforms {
+    final source = activeSource;
+    if (source == null) {
+      // 无活动音源时返回所有平台
+      return ['netease', 'apple', 'qq', 'kugou', 'kuwo'];
+    }
+    
+    // 优先使用音源配置中存储的支持平台
+    if (source.supportedPlatforms.isNotEmpty) {
+      return source.supportedPlatforms;
+    }
+    
+    // 如果是洛雪音源且运行时已加载脚本，从运行时获取
+    if (source.type == AudioSourceType.lxmusic) {
+      final runtime = LxMusicRuntimeService();
+      if (runtime.isScriptReady && runtime.currentScript != null) {
+        final platforms = runtime.currentScript!.supportedPlatforms;
+        if (platforms.isNotEmpty) {
+          return platforms;
+        }
+      }
+    }
+    
+    // 回退到默认配置
+    return defaultSupportedPlatforms[source.type] ?? ['netease', 'apple', 'qq', 'kugou', 'kuwo'];
+  }
 
   String get baseUrl {
     final url = activeSource?.url ?? '';

@@ -106,9 +106,9 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
       curve: Curves.easeInOut,
     );
     
-    // 弹性间距动画控制器 - Apple Music 风格正弦曲线
+    // 弹性间距动画控制器 - PoloMusic 风格超弹性曲线
     _spacingController = AnimationController(
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 700),  // 增加到700ms匹配PoloMusic
       vsync: this,
     );
   }
@@ -135,11 +135,12 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
     final effectiveItemHeight = hasTranslation ? _itemHeight * 1.3 : _itemHeight;
     final targetOffset = index * effectiveItemHeight;
     
-    // 使用正弦缓出曲线滚动 - Apple Music 风格
+    // 使用超弹性曲线滚动 - PoloMusic 风格
+    // 动画会超越目标位置再回弹，产生丝滑弹性感
     _scrollController.animateTo(
       targetOffset,
-      duration: const Duration(milliseconds: 550),
-      curve: const _SineOutCurve(),
+      duration: const Duration(milliseconds: 700),  // 增加到700ms
+      curve: const _ElasticOutCurve(),  // 使用超弹性曲线
     );
   }
   
@@ -252,8 +253,8 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
     return LayoutBuilder(
       builder: (context, constraints) {
         _viewportHeight = constraints.maxHeight;
-        // 可视区域显示约 N 行歌词
-        _itemHeight = _viewportHeight / widget.visibleLineCount;
+        // 可视区域显示约 N 行歌词，乘以 0.6 控制间距
+        _itemHeight = (_viewportHeight / widget.visibleLineCount) * 0.6;
         
         // 首次布局完成后，立即滚动到当前歌词位置
         if (!_hasInitialScrolled && _viewportHeight > 0) {
@@ -366,7 +367,8 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
     );
   }
 
-  /// 获取弹性偏移量 - Apple Music 风格正弦波浪
+  /// 获取弹性偏移量 - PoloMusic 风格分层延迟
+  /// 参考: getDelay = (index) => { diff < 0 ? '0s' : `${0.1 + diff * 0.08}s` }
   double _getElasticOffset(int index) {
     if (_isUserScrolling) return 0.0;
     
@@ -374,26 +376,35 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
     final diff = index - currentIndex;
     
     // 只对当前行附近的几行应用弹性效果
-    if (diff.abs() > 5) return 0.0;
+    if (diff.abs() > 6) return 0.0;
     
-    // 使用正弦函数计算波浪式延迟 - 更自然的衰减
-    // sin(x * π/10) 产生平滑的延迟递增
-    final delay = sin(diff.abs() * pi / 10).clamp(0.0, 0.35);
+    // PoloMusic 风格：上方行无延迟，下方行递增延迟
+    double delay;
+    if (diff < 0) {
+      // 上方的行：无延迟，立即响应
+      delay = 0.0;
+    } else if (diff == 0) {
+      // 当前行：极小延迟
+      delay = 0.05;
+    } else {
+      // 下方行：递增延迟 (0.1 + diff * 0.08)，最大0.6
+      delay = (0.1 + diff * 0.08).clamp(0.0, 0.6);
+    }
     
     // 调整动画进度，考虑延迟
     final adjustedProgress = ((_spacingController.value - delay) / (1.0 - delay)).clamp(0.0, 1.0);
     
-    // 使用正弦缓入缓出曲线 - 平滑自然的过渡
-    final sineValue = const _SineInOutCurve().transform(adjustedProgress);
+    // 使用超弹性曲线 - 产生超越目标再回弹的效果
+    final elasticValue = const _ElasticOutCurve().transform(adjustedProgress);
     
-    // 间距变化量：更含蓄的弹性效果
-    // 初始时刻(progress=0)间距最大，然后平滑回归正常
-    final spacingChange = 16.0 * (1.0 - sineValue);
+    // 间距变化量：初始间距较大，然后平滑回归
+    // 使用更大的基础值(20.0)产生更明显的弹性效果
+    final spacingChange = 20.0 * (1.0 - elasticValue);
     
     // diff > 0 (下方): 向下偏移 (+)
     // diff < 0 (上方): 向上偏移 (-)
-    // 这样中间就被拉开了
-    return spacingChange * diff;
+    // 距离越远，偏移量的增幅越大
+    return spacingChange * diff * (1.0 + diff.abs() * 0.1);
   }
 
   /// 构建单行歌词 - Apple Music 风格
@@ -424,7 +435,7 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
       translationOffset = 3.0 * (1.0 - sineValue);
     }
     
-    final bottomPadding = isActive ? 16.0 : 8.0;
+    final bottomPadding = isActive ? 8.0 : 4.0;
 
     // 构建歌词内容
     Widget lyricContent = Column(
@@ -655,7 +666,30 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
   }
 }
 
-/// 正弦缓出曲线 - Apple Music 风格
+/// 超弹性曲线 - PoloMusic 风格
+/// 模拟 CSS cubic-bezier(0.34, 1.56, 0.64, 1)
+/// 特点：动画会超越目标位置约10%，然后平滑回弹到目标
+/// 这产生了丝滑、有弹性的视觉效果
+class _ElasticOutCurve extends Curve {
+  const _ElasticOutCurve();
+  
+  @override
+  double transformInternal(double t) {
+    // 使用三次贝塞尔曲线近似 cubic-bezier(0.34, 1.56, 0.64, 1)
+    // 控制点: P0=(0,0), P1=(0.34, 1.56), P2=(0.64, 1.0), P3=(1, 1)
+    // P1.y=1.56 > 1.0 会产生超越目标的效果
+    final t2 = t * t;
+    final t3 = t2 * t;
+    
+    // 贝塞尔曲线 Y 分量公式:
+    // B(t) = 3(1-t)²t·P1.y + 3(1-t)t²·P2.y + t³·P3.y
+    return 3 * (1 - t) * (1 - t) * t * 1.56 + 
+           3 * (1 - t) * t2 * 1.0 + 
+           t3;
+  }
+}
+
+/// 正弦缓出曲线 - 用于辅助动画
 /// 快速启动，平滑结束，产生自然流畅的动画效果
 class _SineOutCurve extends Curve {
   const _SineOutCurve();
