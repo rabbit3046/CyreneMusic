@@ -117,6 +117,11 @@ Future<void> main() async {
       await PersistentStorageService().initialize();
     });
     log(' 持久化存储服务已初始化');
+
+    await timed('DeveloperModeService.initialize', () async {
+      await DeveloperModeService().initialize();
+    });
+    log('✅ 开发者模式服务已初始化');
   
     await timed('PersistentStorageService.getBackupStats', () {
       final storageStats = PersistentStorageService().getBackupStats();

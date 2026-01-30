@@ -7,9 +7,7 @@ class DeveloperModeService extends ChangeNotifier {
   static final DeveloperModeService _instance = DeveloperModeService._internal();
   factory DeveloperModeService() => _instance;
   
-  DeveloperModeService._internal() {
-    _initFuture = _loadDeveloperMode();
-  }
+  DeveloperModeService._internal();
 
   bool _isDeveloperMode = false;
   bool get isDeveloperMode => _isDeveloperMode;
@@ -21,12 +19,18 @@ class DeveloperModeService extends ChangeNotifier {
   DateTime? _lastClickTime;
 
   /// 初始化完成的 Future，用于等待加载完成
-  late final Future<void> _initFuture;
+  Future<void>? _initFuture;
   bool _isInitialized = false;
   bool get isInitialized => _isInitialized;
   
-  /// 等待初始化完成
-  Future<void> ensureInitialized() => _initFuture;
+  /// 初始化服务（必须在 WidgetsFlutterBinding.ensureInitialized() 之后调用）
+  Future<void> initialize() {
+    _initFuture ??= _loadDeveloperMode();
+    return _initFuture!;
+  }
+  
+  /// 等待初始化完成（如果尚未初始化则先初始化）
+  Future<void> ensureInitialized() => initialize();
 
   /// 记录日志
   final List<String> _logs = [];
