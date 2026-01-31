@@ -35,6 +35,8 @@ import 'notification_service.dart';
 import 'persistent_storage_service.dart';
 import 'dart:async' as async_lib;
 import 'dart:async' show TimeoutException;
+import '../utils/toast_utils.dart';
+
 
 /// 播放状态枚举
 enum PlayerState {
@@ -346,6 +348,11 @@ class PlayerService extends ChangeNotifier {
         
         // 通知用户（通过回调或事件）
         _notifyAppleMusicRestriction(track);
+        
+        // 移动端弹出 Toast 提示
+        if (Platform.isAndroid || Platform.isIOS) {
+          ToastUtils.error('Apple 播放限制: $_errorMessage');
+        }
         return;
       }
 
@@ -382,11 +389,11 @@ class PlayerService extends ChangeNotifier {
       // 触发下一首封面预缓存
       _precacheNextCover();
       
-      // 记录到播放历史
-      await PlayHistoryService().addToHistory(track);
+      // 记录到播放历史 (✅ 优化：非阻塞调用)
+      PlayHistoryService().addToHistory(track);
       
-      // 记录播放次数
-      await ListeningStatsService().recordPlayCount(track);
+      // 记录播放次数 (✅ 优化：非阻塞调用)
+      ListeningStatsService().recordPlayCount(track);
 
       // 1. 检查缓存
       final qualityStr = selectedQuality.toString().split('.').last;
@@ -489,6 +496,11 @@ class PlayerService extends ChangeNotifier {
           _state = PlayerState.error;
           _errorMessage = '本地文件不存在';
           notifyListeners();
+
+          // 移动端弹出 Toast 提示
+          if (Platform.isAndroid || Platform.isIOS) {
+            ToastUtils.error('本地播放失败: $_errorMessage');
+          }
           return;
         }
 
@@ -534,6 +546,11 @@ class PlayerService extends ChangeNotifier {
         _errorMessage = '无法获取播放链接';
         print('❌ [PlayerService] 播放失败: $_errorMessage');
         notifyListeners();
+
+        // 移动端弹出 Toast 提示
+        if (Platform.isAndroid || Platform.isIOS) {
+          ToastUtils.error('获取 URL 失败: $_errorMessage');
+        }
         return;
       }
 
@@ -634,6 +651,11 @@ class PlayerService extends ChangeNotifier {
             _state = PlayerState.error;
             _errorMessage = 'Apple Music 播放失败: $e';
             notifyListeners();
+
+            // 移动端弹出 Toast 提示
+            if (Platform.isAndroid || Platform.isIOS) {
+              ToastUtils.error('播放失败: $_errorMessage');
+            }
             return;
           }
         } else if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
@@ -709,6 +731,11 @@ class PlayerService extends ChangeNotifier {
                   _state = PlayerState.error;
                   _errorMessage = 'Apple Music 播放失败（本地代理/直连均失败）';
                   notifyListeners();
+                  
+                  // 移动端弹出 Toast 提示
+                  if (Platform.isAndroid || Platform.isIOS) {
+                    ToastUtils.error('播放链接异常: $_errorMessage');
+                  }
                   return;
                 }
               } else {
@@ -733,6 +760,11 @@ class PlayerService extends ChangeNotifier {
                 _state = PlayerState.error;
                 _errorMessage = 'Apple Music 播放失败（本地代理不可用且直连失败）';
                 notifyListeners();
+
+                // 移动端弹出 Toast 提示
+                if (Platform.isAndroid || Platform.isIOS) {
+                  ToastUtils.error('播放链接获取失败: $_errorMessage');
+                }
                 return;
               }
             } else {
@@ -771,9 +803,11 @@ class PlayerService extends ChangeNotifier {
       if (onAudioSourceNotConfigured != null) {
         print('🔔 [PlayerService] 正在调用音源未配置回调...');
         onAudioSourceNotConfigured!();
-        print('🔔 [PlayerService] 回调调用完成');
-      } else {
-        print('⚠️ [PlayerService] 回调未设置，无法显示弹窗');
+      }
+
+      // 移动端弹出 Toast 提示
+      if (Platform.isAndroid || Platform.isIOS) {
+        ToastUtils.error('音源未配置: $_errorMessage');
       }
     } catch (e) {
       _state = PlayerState.error;
@@ -781,6 +815,11 @@ class PlayerService extends ChangeNotifier {
       _isAudioSourceNotConfigured = false;
       print('❌ [PlayerService] 播放异常: $e');
       notifyListeners();
+
+      // 移动端弹出 Toast 提示
+      if (Platform.isAndroid || Platform.isIOS) {
+        ToastUtils.error('播放异常: $_errorMessage');
+      }
     }
   }
 
@@ -940,6 +979,11 @@ class PlayerService extends ChangeNotifier {
       title: 'Apple Music 播放限制',
       body: '由于Apple接口限制，"${track.name}" 需要换源才能播放！',
     );
+    
+    // 移动端弹出 Toast 提示
+    if (Platform.isAndroid || Platform.isIOS) {
+      ToastUtils.error('由于Apple接口限制，该音乐需换源播放');
+    }
     print('🍎 [PlayerService] 已发送 Apple Music 换源提示通知');
   }
 
@@ -1148,48 +1192,47 @@ class PlayerService extends ChangeNotifier {
     }
 
     try {
-      // 检查缓存（为移动端渐变模式添加特殊缓存键）
+      // 检查缓存
       final backgroundService = PlayerBackgroundService();
       final isMobileGradientMode = Platform.isAndroid && 
                                    backgroundService.enableGradient &&
                                    backgroundService.backgroundType == PlayerBackgroundType.adaptive;
-      final cacheKey = isMobileGradientMode ? '${imageUrl}_bottom' : imageUrl;
       
-      if (_themeColorCache.containsKey(cacheKey)) {
-        final cachedColor = _themeColorCache[cacheKey];
-        themeColorNotifier.value = cachedColor;
-        print('🎨 [PlayerService] 使用缓存的主题色: $cachedColor');
+      // ✅ 优化：立即从 ColorExtractionService 获取缓存结果（如果有）
+      ColorExtractionResult? cachedResult;
+      if (isMobileGradientMode) {
+        // 模拟底部 30% 区域（这只是为了匹配之前 extractColorsFromRegion 的缓存键生成方式，
+        // 实际逻辑中我们现在改为在 extractColorFromBottomRegion 里统一处理）
+        // 暂时直接检查 imageUrl 缓存，稍后由异步方法处理
+      } else {
+        cachedResult = ColorExtractionService().getCachedColors(imageUrl);
+      }
+      
+      if (cachedResult != null && cachedResult.themeColor != null) {
+        themeColorNotifier.value = cachedResult.themeColor!;
+        print('🎨 [PlayerService] 使用缓存的主题色: ${cachedResult.themeColor}');
         return;
       }
 
       // ✅ 优化：立即设置默认色，避免UI阻塞
       themeColorNotifier.value = Colors.grey[700]!;
-      print('🎨 [PlayerService] 开始提取主题色${isMobileGradientMode ? '（从封面底部）' : ''}...');
+      print('🎨 [PlayerService] 开始异步提取主题色${isMobileGradientMode ? '（从封面底部）' : ''}...');
       
       Color? themeColor;
-      
-      // 移动端渐变模式：从封面底部区域提取颜色（仍使用 PaletteGenerator）
       if (isMobileGradientMode) {
         themeColor = await _extractColorFromBottomRegion(imageUrl);
       } else {
-        // 其他模式：使用 isolate 提取颜色，不阻塞主线程
-        themeColor = await _extractColorFromFullImageAsync(imageUrl);
+        final result = await ColorExtractionService().extractColorsFromUrl(imageUrl);
+        themeColor = result?.themeColor;
       }
 
-      // 如果提取成功，更新主题色（会平滑过渡）
+      // 如果提取成功，更新主题色
       if (themeColor != null) {
-        _themeColorCache[cacheKey] = themeColor;
         themeColorNotifier.value = themeColor;
         print('✅ [PlayerService] 主题色提取完成: $themeColor');
-      } else {
-        print('⚠️ [PlayerService] 无法从封面提取颜色（可能是网络问题），保持默认灰色');
       }
-    } on TimeoutException catch (e) {
-      print('⏱️ [PlayerService] 主题色提取超时: 网络较慢，保持默认灰色');
-      // 已经设置了默认色，不需要再次设置
     } catch (e) {
       print('⚠️ [PlayerService] 主题色提取失败: $e');
-      // 已经设置了默认色，不需要再次设置
     }
   }
 
@@ -1249,80 +1292,65 @@ class PlayerService extends ChangeNotifier {
     }
   }
 
-  /// 从图片底部区域提取主题色（用于移动端渐变模式）
-  /// 支持网络 URL 和本地文件路径
+  /// 从图片底部区域提取主题色（使用 Isolate 异步提取，不阻塞主线程）
   Future<Color?> _extractColorFromBottomRegion(String imageUrl) async {
     try {
-      // 判断是网络 URL 还是本地文件路径
-      final isNetwork = imageUrl.startsWith('http://') || imageUrl.startsWith('https://');
-      final ImageProvider imageProvider;
+      // ✅ 关键优化：预定义底部区域（底部 30%）
+      // 由于我们不知道图片的原始尺寸，且不想在主线程解码，
+      // 我们在 ColorExtractionService 中处理这个问题。
+      // 为简化，我们传递一个较大的虚拟尺寸，Isolate 内部会自动处理。
+      // 但其实更简单的方法是让 ColorExtractionService 内部自己计算底部。
       
-      if (isNetwork) {
-        imageProvider = CachedNetworkImageProvider(imageUrl);
-      } else {
-        final file = File(imageUrl);
-        if (!await file.exists()) {
-          print('⚠️ [PlayerService] 本地封面文件不存在: $imageUrl');
-          return null;
-        }
-        imageProvider = FileImage(file);
-      }
+      // 这里的 Rect 是相对于原始图片的坐标。因为我们现在不知道图片大小，
+      // 我们修改了 ColorExtractionService 支持直接指定“底部比例”。
+      // 既然目前的 Service 还不支持比例，我们先手动读取一次尺寸（很快）或者
+      // 直接在 Isolate 中解码后进行裁剪。
       
-      // ✅ 优化：使用缩略图加载，减少处理时间
-      final imageStream = imageProvider.resolve(
-        const ImageConfiguration(size: Size(150, 150))
-      );
-      final completer = async_lib.Completer<ui.Image>();
+      // 注意：目前的 ColorExtractionService 已经支持了 Rect 裁剪。
+      // 为了性能，我们这里的解决方案是发送一个特殊的 Rect，
+      // 如果 rect.left 是 -1，表示按比例提取底部。
+      // 或者：直接在这里先用轻量级的手段获取图片尺寸。
+      
+      // 最简单稳定的方案：更新 ColorExtractionService 以便在不知道尺寸时也能处理比例。
+      // 既然已经实施了 Rect 裁剪，我们先在 PlayerService 逻辑中保持简洁。
+      
+      // 🔧 改进：直接让 ColorExtractionService 处理底部 30% 的逻辑
+      // 这里我们先传递一个“标志位”区域，或者就在 Isolate 里面写死 30%。
+      // 咱们还是把逻辑做在 ColorExtractionService 比较干净。
+      
+      // 临时方案（为了不再次修改 Service）：
+      // 先用一个大概的 Rect，或者修改 Service 增加 extractColorsFromBottomFraction。
+      
+      // 💡 更好方案：使用我们刚才新建好的 extractColorsFromRegion。
+      // 我们在内部先快速 Resolve 图片获取尺寸（这在主线程完成，但通常很快）
+      final ImageProvider imageProvider = imageUrl.startsWith('http') 
+          ? CachedNetworkImageProvider(imageUrl) 
+          : FileImage(File(imageUrl));
+      
+      final async_lib.Completer<ui.Image> completer = async_lib.Completer();
+      final ImageStream stream = imageProvider.resolve(const ImageConfiguration());
       late ImageStreamListener listener;
-      
-      listener = ImageStreamListener((ImageInfo info, bool _) {
-        completer.complete(info.image);
-        imageStream.removeListener(listener);
-      }, onError: (exception, stackTrace) {
-        completer.completeError(exception, stackTrace);
-        imageStream.removeListener(listener);
+      listener = ImageStreamListener((info, _) {
+         completer.complete(info.image);
+         stream.removeListener(listener);
+      }, onError: (e, s) {
+         completer.completeError(e, s);
+         stream.removeListener(listener);
       });
+      stream.addListener(listener);
       
-      imageStream.addListener(listener);
-      // ✅ 优化：缩短图片加载超时时间
-      final image = await completer.future.timeout(
-        const Duration(seconds: 3),
-        onTimeout: () {
-          imageStream.removeListener(listener);
-          throw TimeoutException('图片加载超时', const Duration(seconds: 3));
-        },
-      );
+      final image = await completer.future.timeout(const Duration(seconds: 3));
+      final region = Rect.fromLTWH(0, image.height * 0.7, image.width.toDouble(), image.height * 0.3);
       
-      // 计算底部区域（底部 30%）
-      final width = image.width;
-      final height = image.height;
-      final bottomHeight = (height * 0.3).toInt();
-      final topOffset = height - bottomHeight;
-      
-      // 创建一个自定义的 ImageProvider 用于底部区域
-      final region = Rect.fromLTWH(0, topOffset.toDouble(), width.toDouble(), bottomHeight.toDouble());
-      
-      // 对底部区域进行颜色提取
-      final paletteGenerator = await PaletteGenerator.fromImageProvider(
-        imageProvider,
+      final result = await ColorExtractionService().extractColorsFromRegion(
+        imageUrl,
         region: region,
-        size: const Size(150, 150),          // ✅ 优化：使用缩略图尺寸
-        maximumColorCount: 10,                // ✅ 优化：减少采样数（从20降到10）
-        timeout: const Duration(seconds: 3), // ✅ 优化：缩短超时时间
+        sampleSize: 64,
       );
-
-      print('🎨 [PlayerService] 从底部区域提取颜色（区域: ${region.toString()}）');
       
-      return paletteGenerator.vibrantColor?.color ?? 
-             paletteGenerator.dominantColor?.color ??
-             paletteGenerator.mutedColor?.color;
-    } on TimeoutException catch (e) {
-      print('⏱️ [PlayerService] 图片加载超时，回退到默认颜色');
-      // 超时不再回退到全图提取，直接返回 null
-      return null;
+      return result?.themeColor;
     } catch (e) {
-      print('⚠️ [PlayerService] 从底部区域提取颜色失败: $e');
-      // 其他错误也直接返回 null，避免二次尝试
+      print('⚠️ [PlayerService] 异步从底部区域提取颜色失败: $e');
       return null;
     }
   }
@@ -2025,17 +2053,19 @@ class PlayerService extends ChangeNotifier {
       _currentLyricIndex = -1;
       print('🎵 [PlayerService] 悬浮歌词已加载: ${_lyrics.length} 行');
       
-      // 🔥 关键修复：将完整歌词数据发送到Android原生层
-      // 这样即使应用退到后台，原生层也能独立更新歌词
+      // 🔥 关键优化：异步分发歌词数据到 Android 原生层
+      // 避免在播放启动的关键帧进行大规模对象序列化，造成卡顿
       if (Platform.isAndroid && AndroidFloatingLyricService().isVisible) {
-        final lyricsData = _lyrics.map((line) => {
-          'time': line.startTime.inMilliseconds,  // 转换为毫秒
-          'text': line.text,
-          'translation': line.translation ?? '',
-        }).toList();
-        
-        AndroidFloatingLyricService().setLyricsData(lyricsData);
-        print('✅ [PlayerService] 歌词数据已发送到Android原生层，支持后台更新');
+        Future.microtask(() {
+          final lyricsData = _lyrics.map((line) => {
+            'time': line.startTime.inMilliseconds,
+            'text': line.text,
+            'translation': line.translation ?? '',
+          }).toList();
+          
+          AndroidFloatingLyricService().setLyricsData(lyricsData);
+          print('✅ [PlayerService] 歌词数据已异步发送到 Android 原生层');
+        });
       }
       
       // 立即更新当前歌词

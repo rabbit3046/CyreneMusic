@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
+import 'package:fluttertoast/fluttertoast.dart';
 import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
@@ -392,8 +393,8 @@ class _MyAppState extends State<MyApp> {
   void _setupAudioSourceCallback() {
     PlayerService().onAudioSourceNotConfigured = () {
       print('🔔 [MyApp] 音源未配置回调被触发');
-      // 优先使用 _GlobalContextHolder（包含正确的 Localizations）
-      final globalContext = _GlobalContextHolder.context;
+      // 优先使用 GlobalContextHolder（包含正确的 Localizations）
+      final globalContext = GlobalContextHolder.context;
       final navigatorContext = MyApp.navigatorKey.currentContext;
       final contextToUse = globalContext ?? navigatorContext;
       
@@ -442,10 +443,18 @@ class _MyAppState extends State<MyApp> {
                 scrollBehavior: const _FluentScrollBehavior(),
                 builder: (context, child) {
                   // 保存 Navigator context 供全局使用
-                  _GlobalContextHolder._context = context;
+                  // 使用 FToastBuilder 以确保 Toast 能够正确初始化
+                  final ftoastBuilder = FToastBuilder();
                   // 添加 ScaffoldMessenger 支持 SnackBar（即使在 Fluent UI 中）
                   return ScaffoldMessenger(
-                    child: child ?? const SizedBox.shrink(),
+                    child: ftoastBuilder(context, Overlay(
+                      initialEntries: [
+                        OverlayEntry(builder: (innerContext) {
+                          GlobalContextHolder._context = innerContext;
+                          return child!;
+                        }),
+                      ],
+                    )),
                   );
                 },
                 home: isMiniMode ? const MiniPlayerWindowPage() : const DesktopAppGate(),
@@ -478,11 +487,17 @@ class _MyAppState extends State<MyApp> {
             ),
             themeMode: themeManager.themeMode,
             builder: (context, child) {
-              // 保存 Navigator context 供全局使用
-              _GlobalContextHolder._context = context;
+              final ftoastBuilder = FToastBuilder();
               return CupertinoTheme(
                 data: cupertinoTheme,
-                child: child ?? const SizedBox.shrink(),
+                child: ftoastBuilder(context, Overlay(
+                  initialEntries: [
+                    OverlayEntry(builder: (innerContext) {
+                      GlobalContextHolder._context = innerContext;
+                      return child!;
+                    }),
+                  ],
+                )),
               );
             },
             home: const MobileAppGate(),
@@ -500,8 +515,15 @@ class _MyAppState extends State<MyApp> {
             darkTheme: darkTheme,
             themeMode: themeManager.themeMode,
             builder: (context, child) {
-              _GlobalContextHolder._context = context;
-              return child ?? const SizedBox.shrink();
+              final ftoastBuilder = FToastBuilder();
+              return ftoastBuilder(context, Overlay(
+                initialEntries: [
+                  OverlayEntry(builder: (innerContext) {
+                    GlobalContextHolder._context = innerContext;
+                    return child!;
+                  }),
+                ],
+              ));
             },
             home: const MobileAppGate(),
           );
@@ -516,9 +538,15 @@ class _MyAppState extends State<MyApp> {
           darkTheme: darkTheme,
           themeMode: themeManager.themeMode,
           builder: (context, child) {
-            // 保存 Navigator context 供全局使用
-            _GlobalContextHolder._context = context;
-            return child ?? const SizedBox.shrink();
+            final ftoastBuilder = FToastBuilder();
+            return ftoastBuilder(context, Overlay(
+              initialEntries: [
+                OverlayEntry(builder: (innerContext) {
+                  GlobalContextHolder._context = innerContext;
+                  return child!;
+                }),
+              ],
+            ));
           },
           home: Platform.isWindows
             ? _WindowsRoundedContainer(child: const MainLayout())
@@ -530,7 +558,7 @@ class _MyAppState extends State<MyApp> {
 }
 
 /// 全局 Context 保存器
-class _GlobalContextHolder {
+class GlobalContextHolder {
   static BuildContext? _context;
   static BuildContext? get context => _context;
 }

@@ -431,9 +431,10 @@ class _MobilePlayerBackgroundState extends State<MobilePlayerBackground> {
                     ),
                   
                   // 整体模糊层 (始终保持固定模糊度)
+                  // ✅ 性能优化：限制模糊半径最大值为 30，避免 GPU 过载
                   Positioned.fill(
                     child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 30.0, sigmaY: 30.0),
+                      filter: ImageFilter.blur(sigmaX: 25.0, sigmaY: 25.0),
                       child: Container(
                         color: Colors.black.withOpacity(0.1),
                       ),
@@ -627,13 +628,13 @@ class _MobilePlayerBackgroundState extends State<MobilePlayerBackground> {
                   filterQuality: FilterQuality.medium,
                 ),
               ),
-              // 模糊层（性能优化：限制模糊程度避免GPU过载）
-              if (backgroundService.blurAmount > 0 && backgroundService.blurAmount <= 40)
+              // 模糊层（性能优化：限制模糊程度避免GPU过载，最大 25）
+              if (backgroundService.blurAmount > 0)
                 Positioned.fill(
                   child: BackdropFilter(
                     filter: ImageFilter.blur(
-                      sigmaX: backgroundService.blurAmount,
-                      sigmaY: backgroundService.blurAmount,
+                      sigmaX: backgroundService.blurAmount.clamp(0.0, 25.0),
+                      sigmaY: backgroundService.blurAmount.clamp(0.0, 25.0),
                     ),
                     child: Container(
                       color: Colors.black.withOpacity(0.3), // 添加半透明遮罩
