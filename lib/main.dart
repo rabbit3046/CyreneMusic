@@ -542,7 +542,7 @@ class _MyAppState extends State<MyApp> {
           themeMode: themeManager.themeMode,
           builder: (context, child) {
             final ftoastBuilder = FToastBuilder();
-            return ftoastBuilder(context, Overlay(
+            final content = ftoastBuilder(context, Overlay(
               initialEntries: [
                 OverlayEntry(builder: (innerContext) {
                   GlobalContextHolder._context = innerContext;
@@ -550,6 +550,12 @@ class _MyAppState extends State<MyApp> {
                 }),
               ],
             ));
+            
+            // 桌面端添加刷新率助推器
+            if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+              return RefreshRateBooster(child: content);
+            }
+            return content;
           },
           home: Platform.isWindows
             ? _WindowsRoundedContainer(child: const MainLayout())
@@ -742,6 +748,56 @@ void showAudioSourceNotConfiguredDialog(BuildContext context) {
           ],
         );
       },
+    );
+  }
+}
+
+/// 刷新率助推器 (Keep-Alive Component)
+/// 在桌面端通过一个极低负载的动画，诱导 Flutter 引擎始终以显示器最高频率运行
+class RefreshRateBooster extends StatefulWidget {
+  final Widget child;
+  const RefreshRateBooster({super.key, required this.child});
+
+  @override
+  State<RefreshRateBooster> createState() => _RefreshRateBoosterState();
+}
+
+class _RefreshRateBoosterState extends State<RefreshRateBooster> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    // 创建一个极其轻量级的动画
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 1),
+    )..repeat(); // 永远重复
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        widget.child,
+        // 渲染一个几乎不可见（不占像素，不重绘复杂区域）的动画
+        AnimatedBuilder(
+          animation: _controller,
+          builder: (context, _) {
+            // 通过极小的不透明度变化触发重绘，但不产生视觉干扰
+            return const Opacity(
+              opacity: 0.001,
+              child: SizedBox(width: 1, height: 1),
+            );
+          },
+        ),
+      ],
     );
   }
 }

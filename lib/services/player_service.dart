@@ -424,8 +424,9 @@ class PlayerService extends ChangeNotifier {
       
       notifyListeners();
 
-      print('🎵 [PlayerService] 开始播放: ${track.name} - ${track.artists}');
-      print('   Track ID: ${track.id} (类型: ${track.id.runtimeType})');
+      _duration = Duration.zero;
+      _position = Duration.zero;
+      positionNotifier.value = Duration.zero;
       
       // 触发下一首封面预缓存
       _precacheNextCover();

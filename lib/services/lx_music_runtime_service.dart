@@ -85,9 +85,15 @@ class LxMusicRuntimeService {
       ),
       initialSettings: InAppWebViewSettings(
         javaScriptEnabled: true,
-        domStorageEnabled: false,
-        databaseEnabled: false,
-        cacheEnabled: false,
+        domStorageEnabled: true, // 开启 DOM 存储，某些脚本需要持久化
+        databaseEnabled: true,   // 开启数据库
+        cacheEnabled: true,      // 开启缓存以提高性能
+        
+        // Apple 平台稳定性关键配置
+        allowBackgroundAudioPlaying: true, // 允许后台媒体播放
+        allowsInlineMediaPlayback: true,      // 允许内联播放
+        mediaPlaybackRequiresUserGesture: false, // 禁用播放手势限制
+        
         // 安全设置
         allowFileAccess: false,
         allowContentAccess: false,

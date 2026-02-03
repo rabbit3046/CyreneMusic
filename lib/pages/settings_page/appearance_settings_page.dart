@@ -442,7 +442,7 @@ class _AppearanceSettingsContentState extends State<AppearanceSettingsContent> {
       context: context,
       builder: (context) => CupertinoActionSheet(
         title: const Text('选择全屏播放器样式'),
-        actions: LyricStyle.values.map((style) {
+        actions: LyricStyle.values.where((style) => style != LyricStyle.defaultStyle).map((style) {
           final isSelected = LyricStyleService().currentStyle == style;
           return CupertinoActionSheetAction(
             isDefaultAction: isSelected,
@@ -584,7 +584,7 @@ class _AppearanceSettingsContentState extends State<AppearanceSettingsContent> {
               width: 200,
               child: fluent_ui.ComboBox<LyricStyle>(
                 value: LyricStyleService().currentStyle,
-                items: LyricStyle.values.map((style) {
+                items: LyricStyle.values.where((style) => style != LyricStyle.defaultStyle).map((style) {
                   return fluent_ui.ComboBoxItem<LyricStyle>(
                     value: style,
                     child: Text(LyricStyleService().getStyleName(style)),
@@ -1103,7 +1103,7 @@ class _AppearanceSettingsContentState extends State<AppearanceSettingsContent> {
         title: const Text('选择全屏播放器样式'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
-          children: LyricStyle.values.map((style) {
+          children: LyricStyle.values.where((style) => style != LyricStyle.defaultStyle).map((style) {
             return RadioListTile<LyricStyle>(
               title: Text(LyricStyleService().getStyleName(style)),
               subtitle: Text(LyricStyleService().getStyleDescription(style)),

@@ -15,12 +15,14 @@ class _VirtualLyricEntry {
   final _VirtualEntryType type;
   final int? lyricIndex; 
   final Duration startTime;
+  final Duration? endTime; // New: for dots duration
   final String key;
 
   _VirtualLyricEntry({
     required this.type,
     this.lyricIndex,
     required this.startTime,
+    this.endTime,
     required this.key,
   });
 }
@@ -122,15 +124,15 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
             // 检查前奏 dots：只有在距离第一句歌词开始 <= 5s 时才真正“加载”进入队列
             if (widget.lyrics.isNotEmpty) {
               final firstTime = widget.lyrics[0].startTime;
-              final timeToFirst = (firstTime - currentPos).inSeconds;
-              // 如果距离首句还早（>5s），则不加载 dots 项。
-              // 如果进入了 5s 倒计时，或者已经超过首句（用于支持 passed dots 的停留），则加载。
-              if (timeToFirst <= 5) {
-                 virtualEntries.add(_VirtualLyricEntry(
-                   type: _VirtualEntryType.dots,
-                   startTime: Duration.zero,
-                   key: 'dots-intro',
-                 ));
+              // 如果距离首句还早（>2s），则加载 dots 项。
+              // 无论当前处于前奏的哪个阶段，只要前奏足够长，都显示 Dots。
+              if (firstTime > const Duration(seconds: 2)) {
+                virtualEntries.add(_VirtualLyricEntry(
+                  type: _VirtualEntryType.dots,
+                  startTime: Duration.zero,
+                  endTime: firstTime,
+                  key: 'dots-intro',
+                ));
               }
             }
 
@@ -156,14 +158,24 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
                    lineEndTime = currentLine.startTime + currentLine.lineDuration!;
                 }
 
-                // 只有当播放进度已经到达或超过当前句子的“结束点”，且间奏够长，才插入 dots 项
-                if (gap >= 10 && currentPos >= lineEndTime) {
-                  virtualEntries.add(_VirtualLyricEntry(
-                    type: _VirtualEntryType.dots,
-                    startTime: lineEndTime,
-                    key: 'dots-interlude-$i',
-                  ));
-                }
+                  // 实际间奏时长
+                  final actualGap = nextLine.startTime - lineEndTime;
+                  final actualGapSeconds = actualGap.inSeconds;
+
+                  // 只有当播放进度已经到达或超过当前句子的“结束点”，且间奏够长(>2s)，才插入 dots 项
+                  if (actualGapSeconds >= 2 && currentPos >= lineEndTime) {
+                    // 用户需求：如果间奏大于10秒，要从第二秒开始就渲染dot (即延迟 1s 开始)
+                    final dotsStartTime = actualGapSeconds > 10 
+                        ? lineEndTime + const Duration(seconds: 1)
+                        : lineEndTime;
+
+                    virtualEntries.add(_VirtualLyricEntry(
+                      type: _VirtualEntryType.dots,
+                      startTime: dotsStartTime,
+                      endTime: nextLine.startTime,
+                      key: 'dots-${i}-${nextLine.startTime.inMilliseconds}',
+                    ));
+                  }
               }
             }
 
@@ -364,12 +376,7 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
     // 过期占位符强制 0 透明度 (因为它们不再占用空间)
     if (item.type == _VirtualEntryType.dots && diff < 0) targetOpacity = 0.0;
     
-    // 前奏占位符：只有在距离第一句 > 0 且 <= 5s 时才显示初现
-    if (item.key == 'dots-intro') {
-      final firstTime = widget.lyrics[0].startTime;
-      final timeUntilFirst = (firstTime - currentPos).inMilliseconds / 1000.0;
-      if (timeUntilFirst <= 0 || timeUntilFirst > 5.0) targetOpacity = 0.0;
-    }
+
 
     targetOpacity = targetOpacity.clamp(0.0, 1.0).toDouble();
 
@@ -401,6 +408,8 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
       isDragging: _isDragging,
       showTranslation: widget.showTranslation,
       isDots: item.type == _VirtualEntryType.dots,
+      dotsStartTime: item.type == _VirtualEntryType.dots ? item.startTime : null,
+      dotsEndTime: item.type == _VirtualEntryType.dots ? item.endTime : null,
     );
   }
 
@@ -433,7 +442,10 @@ class _ElasticLyricLine extends StatefulWidget {
   final Duration delay;
   final bool isDragging;
   final bool showTranslation;
+
   final bool isDots;
+  final Duration? dotsStartTime;
+  final Duration? dotsEndTime;
 
   const _ElasticLyricLine({
     Key? key,
@@ -453,6 +465,8 @@ class _ElasticLyricLine extends StatefulWidget {
     required this.isDragging,
     required this.showTranslation,
     this.isDots = false,
+    this.dotsStartTime,
+    this.dotsEndTime,
   }) : super(key: key);
 
   @override
@@ -706,7 +720,16 @@ class _ElasticLyricLineState extends State<_ElasticLyricLine> with TickerProvide
   }
   Widget _buildInnerContent() {
     if (widget.isDots) {
-      return const _CountdownDots();
+      // Find the shared position notifier from the parent state if possible, or create a temporary one?
+      // Since _ElasticLyricLine doesn't have direct access to the parent's notifier, 
+      // but we need real-time updates for dots.
+      // Ideally _ElasticLyricLine should also have a position notifier or listen to one.
+      // However, looking at existing code, _KaraokeText creates its own ticker/notifier.
+      // We should probably do the same for _CountdownDots to be self-contained and performant.
+      return _CountdownDots(
+        startTime: widget.dotsStartTime ?? Duration.zero,
+        endTime: widget.dotsEndTime ?? Duration.zero,
+      );
     }
     final fontFamily = LyricFontService().currentFontFamily ?? 'Microsoft YaHei';
     final double textFontSize = LyricStyleService().fontSize;
@@ -1277,87 +1300,211 @@ class _LineClipper extends CustomClipper<Rect> {
   @override bool shouldReclip(_LineClipper oldClipper) => oldClipper.progress != progress;
 }
 
-/// 倒计时点组件 - Apple Music 风格 (三点呼吸动画)
+/// 倒计时点组件 - Apple Music 风格 (Ported from HTML)
 class _CountdownDots extends StatefulWidget {
-  const _CountdownDots();
-  @override State<_CountdownDots> createState() => _CountdownDotsState();
+  final Duration startTime;
+  final Duration endTime;
+
+  const _CountdownDots({
+    required this.startTime,
+    required this.endTime,
+  });
+
+  @override
+  State<_CountdownDots> createState() => _CountdownDotsState();
 }
 
-class _CountdownDotsState extends State<_CountdownDots> with TickerProviderStateMixin {
-  late AnimationController _breatheController;
+class _CountdownDotsState extends State<_CountdownDots> with SingleTickerProviderStateMixin {
+  late Ticker _ticker;
+  
+  // Animation State
+  double _scale = 0.0;
+  double _dot0Opacity = 0.25;
+  double _dot1Opacity = 0.25;
+  double _dot2Opacity = 0.25;
+
+  // Extrapolation State
+  Duration _lastSyncPlayerPos = Duration.zero;
+  Duration _lastSyncTickerElapsed = Duration.zero;
 
   @override
   void initState() {
     super.initState();
-    _breatheController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1500),
-    )..repeat();
+    _ticker = createTicker(_onTick);
+    _ticker.start();
   }
 
   @override
   void dispose() {
-    _breatheController.dispose();
+    _ticker.dispose();
     super.dispose();
   }
 
+  // Utils ported from HTML
+  double _easeOutExpo(double x) {
+    return x == 1.0 ? 1.0 : 1.0 - pow(2, -10 * x);
+  }
+
+  double _easeInOutBack(double x) {
+    const c1 = 1.70158;
+    const c2 = c1 * 1.525;
+    return x < 0.5
+        ? (pow(2 * x, 2) * ((c2 + 1) * 2 * x - c2)) / 2
+        : (pow(2 * x - 2, 2) * ((c2 + 1) * (x * 2 - 2) + c2) + 2) / 2;
+  }
+
+  void _onTick(Duration elapsed) {
+    if (!mounted) return;
+
+    final isPlaying = PlayerService().isPlaying;
+    final currentPos = PlayerService().position;
+
+    // --- Extrapolation Logic ---
+    if (currentPos != _lastSyncPlayerPos) {
+      _lastSyncPlayerPos = currentPos;
+      _lastSyncTickerElapsed = elapsed;
+    }
+
+    Duration extrapolatedPos = currentPos;
+    if (isPlaying) {
+      final timeSinceSync = elapsed - _lastSyncTickerElapsed;
+      if (timeSinceSync.inMilliseconds > 0 && timeSinceSync.inMilliseconds < 500) {
+        extrapolatedPos = currentPos + timeSinceSync;
+      }
+    }
+    // ---------------------------
+
+    final startMs = widget.startTime.inMilliseconds;
+    final endMs = widget.endTime.inMilliseconds;
+    final interludeDuration = (endMs - startMs).toDouble();
+    final currentDuration = (extrapolatedPos.inMilliseconds - startMs).toDouble();
+
+    if (interludeDuration <= 0) {
+       _resetState();
+       return;
+    }
+
+    // Logic from HTML InterludeDots.update
+    if (currentDuration <= interludeDuration && currentDuration >= 0) {
+      const targetBreatheDuration = 1500.0;
+      final breatheDuration = interludeDuration / (interludeDuration / targetBreatheDuration).ceil();
+      
+      double scale = 1.0;
+      double globalOpacity = 1.0;
+
+      // Breathe
+      scale *= sin(1.5 * pi - (currentDuration / breatheDuration) * 2) / 20 + 1;
+
+      // Entry
+      if (currentDuration < 2000) {
+        scale *= _easeOutExpo((currentDuration / 2000).clamp(0.0, 1.0));
+      }
+
+      // Global Opacity Entry
+      if (currentDuration < 500) {
+        globalOpacity = 0.0;
+      } else if (currentDuration < 1000) {
+        globalOpacity *= (currentDuration - 500) / 500;
+      }
+
+      // Exit
+      if (interludeDuration - currentDuration < 750) {
+        scale *= 1.0 - _easeInOutBack(((750 - (interludeDuration - currentDuration)) / 750 / 2).clamp(0.0, 1.0));
+      }
+      if (interludeDuration - currentDuration < 375) {
+        globalOpacity *= ((interludeDuration - currentDuration) / 375).clamp(0.0, 1.0);
+      }
+
+      // Final scale adjustment
+      scale = max(0.0, scale) * 0.7; // HTML uses 0.7 multiplier at end
+
+      // Dots Opacity Cascade
+      final dotsDuration = max(0.0, interludeDuration - 750);
+      
+      // Helper to match HTML: clamp(0.25, ..., 1)
+      double calcOpacity(double val) => (max(0.0, globalOpacity * val)).clamp(0.25, 1.0);
+      // Wait, HTML logic: 
+      // this.dot0.style.opacity = clamp(0, Math.max(0, globalOpacity * dot0Opacity), 1);
+      // dot0Opacity = clamp(0.25, val, 1);
+      // So if globalOpacity is 0, final result is 0.
+      // If globalOpacity is 1, final result is [0.25, 1].
+      
+      double getRawDotOpacity(double t) {
+          // ((currentDuration * 3) / dotsDuration) * 0.75
+          // Logic:
+          // dot0: currentDuration
+          // dot1: currentDuration - dotsDuration/3
+          // dot2: currentDuration - dotsDuration/3*2
+          if (dotsDuration <= 0) return 0.25;
+          final val = (t * 3 / dotsDuration) * 0.75;
+          return val.clamp(0.25, 1.0);
+      }
+
+      double d0 = getRawDotOpacity(currentDuration);
+      double d1 = getRawDotOpacity(currentDuration - dotsDuration / 3);
+      double d2 = getRawDotOpacity(currentDuration - (dotsDuration / 3) * 2);
+
+      // Apply Global Opacity
+      // Formula: clamp(0, max(0, global * dot), 1)
+      double finalize(double dotOp) => (max(0.0, globalOpacity * dotOp)).clamp(0.0, 1.0);
+
+      setState(() {
+        _scale = scale;
+        _dot0Opacity = finalize(d0);
+        _dot1Opacity = finalize(d1);
+        _dot2Opacity = finalize(d2);
+      });
+
+    } else {
+      // Out of bounds
+      _resetState();
+    }
+  }
+
+  void _resetState() {
+     if (_scale != 0.0 || _dot0Opacity != 0.25) {
+        setState(() {
+          _scale = 0.0;
+          _dot0Opacity = 0.0; 
+          _dot1Opacity = 0.0; 
+          _dot2Opacity = 0.0;
+        });
+     }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 20,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: List.generate(3, (index) {
-          return _BreathDot(
-            index: index,
-            controller: _breatheController,
-          );
-        }),
+    if (_scale <= 0.01) return const SizedBox();
+
+    return Transform.scale(
+      scale: _scale,
+      child: SizedBox(
+        height: 40,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildDot(_dot0Opacity),
+            const SizedBox(width: 12), // Doubled gap
+            _buildDot(_dot1Opacity),
+            const SizedBox(width: 12),
+            _buildDot(_dot2Opacity),
+          ],
+        ),
       ),
     );
   }
-}
 
-class _BreathDot extends StatelessWidget {
-  final int index;
-  final AnimationController controller;
-
-  const _BreathDot({required this.index, required this.controller});
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: controller,
-      builder: (context, child) {
-        // 计算每个点的延迟进度 (0.0 到 1.0)
-        double progress = (controller.value - (index * 0.2)) % 1.0;
-        if (progress < 0) progress += 1.0;
-
-        // 呼吸曲线：0 -> 1 -> 0
-        final double value = sin(progress * pi);
-        
-        // 样式：Scale 0.8 -> 1.2, Opacity 0.4 -> 1.0
-        final double scale = 0.8 + (0.4 * value);
-        final double opacity = 0.4 + (0.6 * value);
-
-        return Padding(
-          padding: const EdgeInsets.only(right: 8.0),
-          child: Opacity(
-            opacity: opacity,
-            child: Transform.scale(
-              scale: scale,
-              child: Container(
-                width: 10,
-                height: 10,
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ),
-          ),
-        );
-      },
+  Widget _buildDot(double opacity) {
+    return Opacity(
+      opacity: opacity,
+      child: Container(
+        width: 20,
+        height: 20,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          shape: BoxShape.circle,
+        ),
+      ),
     );
   }
 }

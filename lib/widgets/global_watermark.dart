@@ -73,9 +73,9 @@ class _GlobalWatermarkState extends State<GlobalWatermark> {
               child: CustomPaint(
                 painter: _WatermarkPainter(
                   text: watermarkText,
-                  // 调回隐形水平 (约 1.2%)
-                  // 此数值在 8-bit 色深下仍保持 3 级的灰阶差，对比度拉满后清晰可见
-                  opacity: 0.008, 
+                  // 调回隐形水平 (约 1.5%)
+                  // 此数值在 8-bit 色深下仍保持 4-5 级的灰阶差，对比度拉满后清晰可见
+                  opacity: 0.015, 
                   isDark: brightness == Brightness.dark,
                 ),
               ),
