@@ -1,44 +1,91 @@
-name: iOS starter workflow
+# 工作流名称，在GitHub Actions页面显示
+name: iOS Build & Export IPA (Debug)
 
+# 触发条件：push主分支、提PR、手动触发（推荐保留手动触发，灵活测试）
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ main, master ]
+  workflow_dispatch:  # 手动触发（最实用，优先用这个测试）
 
+# 核心任务：生成Debug-IPA
 jobs:
-  build:
-    name: Build and Test default scheme using any available iPhone simulator
-    runs-on: macos-latest
-
+  build-ios-ipa:
+    # 必须用macOS Runner，iOS工具链专属
+    runs-on: macos-latest  # 预装最新Xcode，也可指定macos-14（Xcode15）/macos-13（Xcode14）
     steps:
-      - name: Checkout
+      # 步骤1：拉取仓库代码到Runner虚拟机
+      - name: Checkout Code
         uses: actions/checkout@v4
-      - name: Set Default Scheme
+
+      # 步骤2：安装CocoaPods（无CocoaPods则删除此步骤）
+      - name: Install CocoaPods & Dependencies
         run: |
-          scheme_list=$(xcodebuild -list -json | tr -d "\n")
-          default=$(echo $scheme_list | ruby -e "require 'json'; puts JSON.parse(STDIN.gets)['project']['targets'][0]")
-          echo $default | cat >default
-          echo Using default scheme: $default
-      - name: Build
-        env:
-          scheme: ${{ 'default' }}
-          platform: ${{ 'iOS Simulator' }}
+          gem install cocoapods
+          pod install --repo-update  # 安装项目依赖
+
+      # 步骤3：指定Xcode版本（可选，删除则用默认最新版）
+      - name: Select Xcode Version
         run: |
-          # xcrun xctrace returns via stderr, not the expected stdout (see https://developer.apple.com/forums/thread/663959)
-          device=`xcrun xctrace list devices 2>&1 | grep -oE 'iPhone.*?[^\(]+' | head -1 | awk '{$1=$1;print}' | sed -e "s/ Simulator$//"`
-          if [ $scheme = default ]; then scheme=$(cat default); fi
-          if [ "`ls -A | grep -i \\.xcworkspace\$`" ]; then filetype_parameter="workspace" && file_to_build="`ls -A | grep -i \\.xcworkspace\$`"; else filetype_parameter="project" && file_to_build="`ls -A | grep -i \\.xcodeproj\$`"; fi
-          file_to_build=`echo $file_to_build | awk '{$1=$1;print}'`
-          xcodebuild build-for-testing -scheme "$scheme" -"$filetype_parameter" "$file_to_build" -destination "platform=$platform,name=$device"
-      - name: Test
-        env:
-          scheme: ${{ 'default' }}
-          platform: ${{ 'iOS Simulator' }}
+          sudo xcode-select -s /Applications/Xcode_15.2.app  # 指定Xcode15.2
+          xcodebuild -version  # 验证版本，方便排错
+
+      # 步骤4：核心步骤1 - 生成归档包（.xcarchive）【必须修改自定义项】
+      - name: Archive iOS Project
         run: |
-          # xcrun xctrace returns via stderr, not the expected stdout (see https://developer.apple.com/forums/thread/663959)
-          device=`xcrun xctrace list devices 2>&1 | grep -oE 'iPhone.*?[^\(]+' | head -1 | awk '{$1=$1;print}' | sed -e "s/ Simulator$//"`
-          if [ $scheme = default ]; then scheme=$(cat default); fi
-          if [ "`ls -A | grep -i \\.xcworkspace\$`" ]; then filetype_parameter="workspace" && file_to_build="`ls -A | grep -i \\.xcworkspace\$`"; else filetype_parameter="project" && file_to_build="`ls -A | grep -i \\.xcodeproj\$`"; fi
-          file_to_build=`echo $file_to_build | awk '{$1=$1;print}'`
-          xcodebuild test-without-building -scheme "$scheme" -"$filetype_parameter" "$file_to_build" -destination "platform=$platform,name=$device"
+          # xcodebuild archive 归档命令，替换为你的项目信息
+          xcodebuild \
+            -workspace YourProject.xcworkspace \  # 纯Xcode项目替换为 -project YourProject.xcodeproj
+            -scheme YourSchemeName \              # 你的项目Scheme名称（Xcode中可见）
+            -configuration Debug \                # 编译配置：Debug（免签名）
+            -destination 'generic/platform=iOS' \ # 通用iOS平台，不指定设备
+            -archivePath ./build/YourProject.xcarchive \  # 归档包输出路径（自定义，方便查找）
+            archive \                              # 执行归档命令
+            CODE_SIGNING_ALLOWED=NO \              # 关闭签名（Debug核心，不可删）
+            CODE_SIGNING_REQUIRED=NO
+
+      # 步骤5：核心步骤2 - 从归档包导出IPA【无需修改，适配上面的归档路径】
+      - name: Export Archive to IPA
+        run: |
+          # 创建IPA输出目录
+          mkdir -p ./build/ipa
+          # 导出IPA命令，指定导出配置和路径
+          xcodebuild \
+            -exportArchive \
+            -archivePath ./build/YourProject.xcarchive \  # 对应上面的归档路径
+            -exportPath ./build/ipa \                     # IPA输出目录
+            -exportOptionsPlist ./build/ExportOptions.plist \  # 导出配置文件（自动生成）
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+          # 自动生成简易的ExportOptions.plist（Debug免签名专用，关键！）
+          cat > ./build/ExportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>development</string>  # 开发版导出方式，适配Debug
+              <key>teamID</key>
+              <string>dummy</string>        # 虚拟TeamID，免签名用
+              <key>signingStyle</key>
+              <string>manual</string>
+              <key>stripSwiftSymbols</key>
+              <false/>
+              <key>uploadBitcode</key>
+              <false/>
+              <key>uploadSymbols</key>
+              <false/>
+          </dict>
+          </plist>
+          EOF
+
+      # 步骤6：上传IPA和归档包作为Artifacts（方便在GitHub下载）
+      - name: Upload IPA & Archive Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: iOS-Debug-IPA  # 产物名称，自定义
+          path: |              # 上传的文件：IPA包 + 归档包（可选，可只留ipa/**/*）
+            ./build/ipa/*.ipa
+            ./build/*.xcarchive
+          retention-days: 7    # 产物保留7天，可修改（默认90天）
