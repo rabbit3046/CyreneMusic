@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import '../models/track.dart';
 import '../models/playlist.dart';
 import 'url_service.dart';
+import 'audio_source_service.dart';
 
 /// 换源搜索结果
 class SourceSwitchResult {
@@ -176,6 +177,8 @@ class TrackSourceSwitchService extends ChangeNotifier {
           return await _searchKugou(keyword, baseUrl);
         case MusicSource.kuwo:
           return await _searchKuwo(keyword, baseUrl);
+        case MusicSource.spotify:
+          return await _searchSpotify(keyword, baseUrl);
         case MusicSource.local:
           return [];
       }
@@ -269,7 +272,8 @@ class TrackSourceSwitchService extends ChangeNotifier {
 
   /// 搜索酷狗音乐
   Future<List<Track>> _searchKugou(String keyword, String baseUrl) async {
-    final url = '$baseUrl/kugou/search?keywords=${Uri.encodeComponent(keyword)}';
+    final url = AudioSourceService().buildKugouSearchUrl(keyword);
+    print('🔍 [TrackSourceSwitchService] 酷狗搜索 URL: $url');
     final response = await http.get(
       Uri.parse(url),
       headers: {'Content-Type': 'application/json'},
@@ -320,5 +324,48 @@ class TrackSourceSwitchService extends ChangeNotifier {
       }
     }
     throw Exception('酷我音乐搜索失败');
+  }
+
+  /// 搜索 Spotify
+  Future<List<Track>> _searchSpotify(String keyword, String baseUrl) async {
+    final url = '$baseUrl/spotify/search?keywords=${Uri.encodeComponent(keyword)}&limit=1&type=track';
+    
+    final response = await http.get(
+      Uri.parse(url),
+      headers: {'Content-Type': 'application/json'},
+    ).timeout(const Duration(seconds: 10));
+
+    if (response.statusCode == 200) {
+      final data = json.decode(utf8.decode(response.bodyBytes));
+      // 兼容直接返回或 {status, data} 包装
+      dynamic tracksData;
+      if (data['tracks'] != null) {
+        tracksData = data['tracks'];
+      } else if (data['data'] != null && data['data']['tracks'] != null) {
+        tracksData = data['data']['tracks'];
+      }
+
+      if (tracksData != null && tracksData['items'] != null) {
+        final items = tracksData['items'] as List<dynamic>;
+        return items.take(1).map((item) {
+          final album = item['album'];
+          final artists = (item['artists'] as List<dynamic>)
+              .map((a) => a['name'] as String)
+              .join(',');
+          final images = album['images'] as List<dynamic>;
+          final picUrl = images.isNotEmpty ? images[0]['url'] as String : '';
+          
+          return Track(
+            id: item['id'],
+            name: item['name'] as String,
+            artists: artists,
+            album: album['name'] as String,
+            picUrl: picUrl,
+            source: MusicSource.spotify,
+          );
+        }).toList();
+      }
+    }
+    throw Exception('Spotify 搜索失败');
   }
 }

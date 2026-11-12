@@ -1,11 +1,15 @@
 import 'dart:io';
 import 'dart:ui' as ui;
+import '../services/audio_source_service.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../widgets/custom_title_bar.dart';
 import '../widgets/cupertino/cupertino_bottom_nav.dart';
+import '../widgets/oculus/oculus_bottom_nav.dart';
 import '../widgets/mini_player.dart';
 import '../pages/home_page.dart';
 import '../pages/discover_page.dart';
@@ -24,6 +28,8 @@ import '../utils/theme_manager.dart';
 import '../pages/auth/auth_page.dart';
 import '../services/auth_overlay_service.dart';
 import '../services/player_service.dart';
+import '../services/persistent_storage_service.dart';
+import '../pages/mobile_setup_page.dart';
 import '../widgets/global_watermark.dart';
 
 /// 主布局 - 包含侧边导航栏和内容区域
@@ -44,6 +50,15 @@ class _MainLayoutState extends State<MainLayout>
 
   // 页面列表
   List<Widget> get _pages {
+    final isLocalMode = PersistentStorageService().enableLocalMode;
+
+    if (isLocalMode) {
+      return [
+        const LocalPage(),
+        MobileSetupPage(), // 本地模式下的“设置”显示引导页
+      ];
+    }
+
     final pages = <Widget>[
       const HomePage(),
       const DiscoverPage(),
@@ -66,6 +81,9 @@ class _MainLayoutState extends State<MainLayout>
   int get _settingsIndex => _pages.indexWhere((w) => w is SettingsPage);
 
   Future<void> _openMoreBottomSheet(BuildContext context) async {
+    final isLocalMode = PersistentStorageService().enableLocalMode;
+    if (isLocalMode) return; // 本地模式下没有“更多”选项，因为只有 2 个 Tab
+
     await showModalBottomSheet(
       context: context,
       showDragHandle: true,
@@ -147,6 +165,9 @@ class _MainLayoutState extends State<MainLayout>
     DeveloperModeService().addListener(_onDeveloperModeChanged);
     // 监听主题变化（包括移动端主题框架切换）
     ThemeManager().addListener(_onThemeChanged);
+    // 监听音源服务变化（用于本地模式切换）
+    AudioSourceService().addListener(_onThemeChanged); // 重用 _onThemeChanged 逻辑即可
+
 
     // 初始化系统主题色（在 build 完成后执行）
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -172,6 +193,7 @@ class _MainLayoutState extends State<MainLayout>
     PageVisibilityNotifier().removeListener(_onPageVisibilityNotifierChanged);
     DeveloperModeService().removeListener(_onDeveloperModeChanged);
     ThemeManager().removeListener(_onThemeChanged);
+    AudioSourceService().removeListener(_onThemeChanged);
     super.dispose();
   }
 
@@ -198,6 +220,7 @@ class _MainLayoutState extends State<MainLayout>
   }
 
   void _onThemeChanged() {
+    print('🎨 [MainLayout] _onThemeChanged called (Theme or AudioSource change)');
     if (mounted) {
       // 使用 addPostFrameCallback 避免在构建期间调用 setState
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -212,11 +235,13 @@ class _MainLayoutState extends State<MainLayout>
     if (mounted) {
       final newIndex = PageVisibilityNotifier().currentPageIndex;
       if (_selectedIndex != newIndex && newIndex < _pages.length) {
+        print('📡 [MainLayout] PageVisibilityNotifier triggered index: $newIndex (Current: $_selectedIndex)');
         // 使用 addPostFrameCallback 避免在构建期间调用 setState
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             setState(() {
               _selectedIndex = newIndex;
+              print('🔄 [MainLayout] _selectedIndex updated via Notifier to: $_selectedIndex');
             });
           }
         });
@@ -354,6 +379,7 @@ class _MainLayoutState extends State<MainLayout>
 
   @override
   Widget build(BuildContext context) {
+    print('🏗️ [MainLayout] build called. SelectedIndex: $_selectedIndex, LocalMode: ${PersistentStorageService().enableLocalMode}');
     // 根据平台选择不同的布局
     if (Platform.isAndroid || Platform.isIOS) {
       if (ThemeManager().isTablet) {
@@ -469,8 +495,12 @@ class _MainLayoutState extends State<MainLayout>
 
   /// 构建移动端布局（Android/iOS）
   Widget _buildMobileLayout(BuildContext context) {
+    final isLocalMode = PersistentStorageService().enableLocalMode;
+    print('📱 [MainLayout] Building Mobile Layout (LocalMode: $isLocalMode, SelectedIndex: $_selectedIndex)');
+    
     final colorScheme = Theme.of(context).colorScheme;
     final isCupertinoUI = (Platform.isIOS || Platform.isAndroid) && ThemeManager().isCupertinoFramework;
+    final isOculusUI = (Platform.isIOS || Platform.isAndroid) && ThemeManager().isOculusFramework;
 
     return PopScope(
       canPop: false, // 始终拦截返回键
@@ -499,7 +529,7 @@ class _MainLayoutState extends State<MainLayout>
             Positioned(
               left: 0,
               right: 0,
-              bottom: isCupertinoUI ? 80 : 0, // Cupertino 模式下给悬浮 Tab 栏留空间
+              bottom: isOculusUI ? 100 : (isCupertinoUI ? 80 : 0), // Oculus 全宽底栏较高
               child: AnimatedBuilder(
                 animation: PlayerService(),
                 builder: (context, child) {
@@ -519,17 +549,25 @@ class _MainLayoutState extends State<MainLayout>
                 bottom: 0,
                 child: _buildCupertinoTabBar(context),
               ),
+            // Oculus 悬浮胶囊 Tab 栏
+            if (isOculusUI)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: _buildOculusTabBar(context),
+              ),
           ],
         ),
-        // 非 Cupertino 模式使用 bottomNavigationBar
-        bottomNavigationBar: isCupertinoUI 
+        // 非悬浮模式使用 bottomNavigationBar
+        bottomNavigationBar: (isCupertinoUI || isOculusUI) 
             ? null
             : _buildGlassBottomNavigationBar(context),
       ),
     );
   }
 
-  /// 构建 iOS 26 风格的悬浮液态玻璃底部导航栏
+  /// 构建 iOS 26 风格的悬浮液态玻璃底部导航栏（使用 liquid_glass_widgets 库）
   Widget _buildCupertinoTabBar(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final orientation = MediaQuery.of(context).orientation;
@@ -537,137 +575,136 @@ class _MainLayoutState extends State<MainLayout>
     final int supportIndex = _supportIndex;
     final int myIndex = _pages.indexWhere((w) => w is MyPage);
     final bottomPadding = MediaQuery.of(context).padding.bottom;
-    
-    // 计算当前选中的 tab 索引
-    int navSelectedIndex() {
-      if (_selectedIndex == 0) return 0; // 首页
-      if (_selectedIndex == 1) return 1; // 发现
-      if (_selectedIndex == myIndex) return 2; // 我的
-      if (isLandscape && _selectedIndex == supportIndex) return 3; // 支持
-      return isLandscape ? 4 : 3; // 更多
-    }
-    
-    // Tab 项目数据 - 使用自定义 SVG 图标
-    final List<_FloatingTabItem> tabItems = [
-      _FloatingTabItem(
-        svgAsset: 'assets/ui/FluentColorHome16.svg',
-        label: '首页',
-      ),
-      _FloatingTabItem(
-        svgAsset: 'assets/ui/FluentColorSearchSparkle16.svg',
-        label: '发现',
-      ),
-      _FloatingTabItem(
-        svgAsset: 'assets/ui/FluentColorPerson16.svg',
-        label: '我的',
-      ),
-      if (isLandscape)
-        _FloatingTabItem(
-          svgAsset: 'assets/ui/FluentColorHeart16.svg',
-          label: '支持',
-        ),
-      _FloatingTabItem(
-        svgAsset: 'assets/ui/FluentColorAppsList20.svg',
-        label: '更多',
-      ),
-    ];
-    
-    final int currentIndex = navSelectedIndex();
-    
-    return Container(
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        bottom: bottomPadding > 0 ? bottomPadding : 16,
-        top: 8,
-      ),
-      child: _LiquidGlassContainer(
-        borderRadius: 32,
-        height: 60,
-        isDark: isDark,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: List.generate(tabItems.length, (index) {
-            final item = tabItems[index];
-            final isSelected = index == currentIndex;
-            
-            return Expanded(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () async {
-                  final int moreTab = tabItems.length - 1;
-                  if (index == moreTab) {
-                    await _openCupertinoMoreSheet(context);
-                    return;
-                  }
-                  
-                  int targetPageIndex = _selectedIndex;
-                  if (index == 0) targetPageIndex = 0; // 首页
-                  if (index == 1) targetPageIndex = 1; // 发现
-                  if (index == 2) targetPageIndex = myIndex; // 我的
-                  if (isLandscape && index == 3) targetPageIndex = supportIndex; // 支持
-                  
-                  setState(() {
-                    _selectedIndex = targetPageIndex;
-                  });
-                  PageVisibilityNotifier().setCurrentPage(targetPageIndex);
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeOutCubic,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      // 图标容器（选中时有背景）
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        curve: Curves.easeOutCubic,
-                        padding: EdgeInsets.symmetric(
-                          horizontal: isSelected ? 16 : 12,
-                          vertical: isSelected ? 6 : 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? ThemeManager.iosBlue.withOpacity(0.2)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: SvgPicture.asset(
-                          item.svgAsset,
-                          width: 22,
-                          height: 22,
-                          fit: BoxFit.contain,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      // 标签
-                      AnimatedDefaultTextStyle(
-                        duration: const Duration(milliseconds: 200),
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                          color: isSelected
-                              ? ThemeManager.iosBlue
-                              : (isDark 
-                                  ? Colors.white.withOpacity(0.7) 
-                                  : Colors.black.withOpacity(0.5)),
-                          shadows: [
-                            Shadow(
-                              color: Colors.black.withOpacity(0.2),
-                              blurRadius: 4,
-                              offset: const Offset(0, 1),
-                            ),
-                          ],
-                        ),
-                        child: Text(item.label),
-                      ),
-                    ],
-                  ),
-                ),
+    final isLocalMode = PersistentStorageService().enableLocalMode;
+
+    // 构建 GlassBottomBarTab 列表
+    final List<GlassBottomBarTab> tabs = isLocalMode
+        ? [
+            GlassBottomBarTab(
+              label: '本地',
+              icon: SvgPicture.asset('assets/ui/FluentColorHistory16.svg', width: 22, height: 22),
+            ),
+            GlassBottomBarTab(
+              label: '退出本地',
+              icon: SvgPicture.asset('assets/ui/FluentColorSettings16.svg', width: 22, height: 22),
+            ),
+          ]
+        : [
+            GlassBottomBarTab(
+              label: '首页',
+              icon: SvgPicture.asset('assets/ui/FluentColorHome16.svg', width: 22, height: 22),
+            ),
+            GlassBottomBarTab(
+              label: '发现',
+              icon: SvgPicture.asset('assets/ui/FluentColorSearchSparkle16.svg', width: 22, height: 22),
+            ),
+            GlassBottomBarTab(
+              label: '我的',
+              icon: SvgPicture.asset('assets/ui/FluentColorPerson16.svg', width: 22, height: 22),
+            ),
+            if (isLandscape)
+              GlassBottomBarTab(
+                label: '支持',
+                icon: SvgPicture.asset('assets/ui/FluentColorHeart16.svg', width: 22, height: 22),
               ),
-            );
-          }),
+            GlassBottomBarTab(
+              label: '更多',
+              icon: SvgPicture.asset('assets/ui/FluentColorAppsList20.svg', width: 22, height: 22),
+            ),
+          ];
+
+    // 计算当前选中的 nav 索引
+    int currentIndex;
+    if (isLocalMode) {
+      currentIndex = _selectedIndex;
+    } else if (_selectedIndex == 0) {
+      currentIndex = 0; // 首页
+    } else if (_selectedIndex == 1) {
+      currentIndex = 1; // 发现
+    } else if (_selectedIndex == myIndex) {
+      currentIndex = 2; // 我的
+    } else if (isLandscape && _selectedIndex == supportIndex) {
+      currentIndex = 3; // 支持
+    } else {
+      currentIndex = isLandscape ? 4 : 3; // 更多
+    }
+
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: bottomPadding > 0 ? bottomPadding - 8 : 0,
+      ),
+      child: GlassBottomBar(
+        tabs: tabs,
+        selectedIndex: currentIndex.clamp(0, tabs.length - 1),
+        onTabSelected: (index) {
+          if (isLocalMode) {
+            if (index == _selectedIndex) return;
+            setState(() => _selectedIndex = index);
+            PageVisibilityNotifier().setCurrentPage(index);
+            return;
+          }
+
+          // “更多” Tab
+          final int moreTab = tabs.length - 1;
+          if (index == moreTab) {
+            _openCupertinoMoreSheet(context);
+            return;
+          }
+
+          int targetPageIndex;
+          if (index == 0) {
+            targetPageIndex = 0; // 首页
+          } else if (index == 1) {
+            targetPageIndex = 1; // 发现
+          } else if (index == 2) {
+            targetPageIndex = myIndex; // 我的
+          } else if (isLandscape && index == 3) {
+            targetPageIndex = supportIndex; // 支持 (横屏)
+          } else {
+            return;
+          }
+
+          setState(() => _selectedIndex = targetPageIndex);
+          PageVisibilityNotifier().setCurrentPage(targetPageIndex);
+        },
+        barHeight: 60,
+        verticalPadding: 8,
+        horizontalPadding: 12,
+        quality: GlassQuality.premium, // 底部栏是固定表面，使用 premium 获得完整 shader 管线
+        showIndicator: true,
+        magnification: 1.15, // 轻微透镜放大效果，选中 Tab 有视觉焦点感
+        iconSize: 22,
+        labelFontSize: 10,
+        selectedIconColor: Colors.white,
+        unselectedIconColor: isDark ? Colors.white70 : Colors.black54,
+        // 主体玻璃面板的折射参数
+        glassSettings: LiquidGlassSettings(
+          thickness: isDark ? 40 : 25,           // 暗色模式下更厚实、更有质感
+          blur: isDark ? 5 : 3,                   // 模糊强度
+          chromaticAberration: 0.4,               // 色散效果 — 彩虹边缘折射
+          refractiveIndex: 1.6,                   // 折射率 — 接近光学玻璃
+          saturation: isDark ? 0.8 : 0.6,         // 饱和度 — 暗色下更丰富
+          lightIntensity: isDark ? 0.8 : 0.5,     // 高光强度
+          ambientStrength: 1.0,                   // 环境光
+          specularSharpness: GlassSpecularSharpness.medium, // iOS 26 标准高光
+          glassColor: isDark 
+              ? const Color(0x3DFFFFFF)            // 暗色模式: white24
+              : const Color(0x1AFFFFFF),           // 亮色模式: 更通透
         ),
+        // 滑动指示器的折射参数 — 更强的折射感以突出选中态
+        indicatorSettings: const LiquidGlassSettings(
+          thickness: 20,
+          blur: 0,
+          chromaticAberration: 0.6,               // 指示器色散更强
+          refractiveIndex: 1.2,                   // 略微折射
+          saturation: 1.5,                        // 高饱和使选中态更鲜明
+          lightIntensity: 2.0,                    // 强高光
+          glassColor: Color.from(alpha: 0.12, red: 1, green: 1, blue: 1),
+        ),
+        // 发光效果参数
+        glowBlurRadius: 36,
+        glowSpreadRadius: 10,
+        glowOpacity: isDark ? 0.7 : 0.5,
       ),
     );
   }
@@ -707,45 +744,131 @@ class _MainLayoutState extends State<MainLayout>
     );
   }
 
+  /// 构建 Oculus 风格的悬浮精致底部导航栏
+  Widget _buildOculusTabBar(BuildContext context) {
+    final isLocalMode = PersistentStorageService().enableLocalMode;
+    final int myIndex = _pages.indexWhere((w) => w is MyPage);
+    
+    // Tab 项目数据
+    final List<OculusNavItem> tabItems = isLocalMode
+        ? [
+            const OculusNavItem(
+              svgAsset: 'assets/ui/FluentColorHistory16.svg',
+              label: '本地',
+            ),
+            const OculusNavItem(
+              svgAsset: 'assets/ui/FluentColorSettings16.svg',
+              label: '设置',
+            ),
+          ]
+        : [
+            const OculusNavItem(
+              svgAsset: 'assets/ui/FluentColorHome16.svg',
+              label: '首页',
+            ),
+            const OculusNavItem(
+              svgAsset: 'assets/ui/FluentColorSearchSparkle16.svg',
+              label: '发现',
+            ),
+            const OculusNavItem(
+              svgAsset: 'assets/ui/FluentColorPerson16.svg',
+              label: '我的',
+            ),
+            const OculusNavItem(
+              svgAsset: 'assets/ui/FluentColorAppsList20.svg',
+              label: '更多',
+            ),
+          ];
+
+    int navSelectedIndex() {
+      if (isLocalMode) return _selectedIndex;
+      if (_selectedIndex == 0) return 0;
+      if (_selectedIndex == 1) return 1;
+      if (_selectedIndex == myIndex) return 2;
+      return tabItems.length - 1; // 更多
+    }
+
+    return OculusBottomNavigationBar(
+      currentIndex: navSelectedIndex(),
+      onTap: (index) async {
+        if (isLocalMode) {
+          setState(() => _selectedIndex = index);
+          PageVisibilityNotifier().setCurrentPage(index);
+          return;
+        }
+
+        final int moreTab = tabItems.length - 1;
+        if (index == moreTab) {
+          await _openMoreBottomSheet(context);
+          return;
+        }
+
+        int targetIndex = index;
+        if (index == 2) targetIndex = myIndex;
+        
+        setState(() => _selectedIndex = targetIndex);
+        PageVisibilityNotifier().setCurrentPage(targetIndex);
+      },
+      items: tabItems,
+    );
+  }
+
   Widget _buildGlassBottomNavigationBar(BuildContext context) {
+    final isLocalMode = PersistentStorageService().enableLocalMode;
+    print('🎨 [MainLayout] Building Glass Bottom Navigation (LocalMode: $isLocalMode)');
     final orientation = MediaQuery.of(context).orientation;
     final bool useGlass = Platform.isAndroid || orientation == Orientation.portrait;
 
     final bool isLandscape = orientation == Orientation.landscape;
     final int supportIndex = _supportIndex;
     final int myIndex = _pages.indexWhere((w) => w is MyPage);
-
     // Build destinations: landscape adds Support tab before More
-    final List<NavigationDestination> destinations = [
-      const NavigationDestination(
-        icon: Icon(Icons.home_outlined),
-        selectedIcon: Icon(Icons.home),
-        label: '首页',
-      ),
-      const NavigationDestination(
-        icon: Icon(Icons.explore_outlined),
-        selectedIcon: Icon(Icons.explore),
-        label: '发现',
-      ),
-      const NavigationDestination(
-        icon: Icon(Icons.person_outlined),
-        selectedIcon: Icon(Icons.person),
-        label: '我的',
-      ),
-      if (isLandscape)
-        const NavigationDestination(
-          icon: Icon(Icons.favorite_outline),
-          selectedIcon: Icon(Icons.favorite),
-          label: '支持',
-        ),
-      const NavigationDestination(
-        icon: Icon(Icons.more_horiz),
-        selectedIcon: Icon(Icons.more_horiz),
-        label: '更多',
-      ),
-    ];
+    final List<NavigationDestination> destinations = isLocalMode
+        ? [
+            const NavigationDestination(
+              icon: Icon(Icons.folder_open_outlined),
+              selectedIcon: Icon(Icons.folder_open),
+              label: '本地',
+            ),
+            const NavigationDestination(
+              icon: Icon(Icons.settings_outlined),
+              selectedIcon: Icon(Icons.settings),
+              label: '设置',
+            ),
+          ]
+        : [
+            const NavigationDestination(
+              icon: Icon(Icons.home_outlined),
+              selectedIcon: Icon(Icons.home),
+              label: '首页',
+            ),
+            const NavigationDestination(
+              icon: Icon(Icons.explore_outlined),
+              selectedIcon: Icon(Icons.explore),
+              label: '发现',
+            ),
+            const NavigationDestination(
+              icon: Icon(Icons.person_outlined),
+              selectedIcon: Icon(Icons.person),
+              label: '我的',
+            ),
+            if (isLandscape)
+              const NavigationDestination(
+                icon: Icon(Icons.favorite_outline),
+                selectedIcon: Icon(Icons.favorite),
+                label: '支持',
+              ),
+            const NavigationDestination(
+              icon: Icon(Icons.more_horiz),
+              selectedIcon: Icon(Icons.more_horiz),
+              label: '更多',
+            ),
+          ];
 
     int navSelectedIndex() {
+      final isLocalMode = PersistentStorageService().enableLocalMode;
+      if (isLocalMode) return _selectedIndex;
+
       if (_selectedIndex == 0) return 0; // 首页
       if (_selectedIndex == 1) return 1; // 发现
       if (_selectedIndex == myIndex) return 2; // 我的
@@ -756,22 +879,35 @@ class _MainLayoutState extends State<MainLayout>
     final baseNav = NavigationBar(
       selectedIndex: navSelectedIndex(),
       onDestinationSelected: (int tabIndex) async {
-        final int moreTab = destinations.length - 1;
-        if (tabIndex == moreTab) {
-          await _openMoreBottomSheet(context);
-          return;
+        final isLocalMode = PersistentStorageService().enableLocalMode;
+        print('🖱️ [MainLayout] NavigationBar tab selected: $tabIndex (LocalMode: $isLocalMode)');
+        
+        int targetIndex = tabIndex;
+        if (!isLocalMode) {
+          final int moreTab = destinations.length - 1;
+          if (tabIndex == moreTab) {
+            print('📑 [MainLayout] Opening "More" bottom sheet');
+            await _openMoreBottomSheet(context);
+            return;
+          }
+
+          // 修复索引映射：从标签索引映射回真实的页面索引
+          if (tabIndex == 0) {
+            targetIndex = 0;
+          } else if (tabIndex == 1) {
+            targetIndex = 1;
+          } else if (tabIndex == 2) {
+            targetIndex = myIndex;
+          } else if (isLandscape && tabIndex == 3) {
+            targetIndex = supportIndex;
+          }
         }
 
-        int targetPageIndex = _selectedIndex;
-        if (tabIndex == 0) targetPageIndex = 0; // 首页
-        if (tabIndex == 1) targetPageIndex = 1; // 发现
-        if (tabIndex == 2) targetPageIndex = myIndex; // 我的
-        if (isLandscape && tabIndex == 3) targetPageIndex = supportIndex; // 支持
-
         setState(() {
-          _selectedIndex = targetPageIndex;
+          _selectedIndex = targetIndex;
+          print('🔄 [MainLayout] _selectedIndex updated to: $_selectedIndex');
         });
-        PageVisibilityNotifier().setCurrentPage(targetPageIndex);
+        PageVisibilityNotifier().setCurrentPage(targetIndex);
       },
       destinations: destinations,
     );
@@ -918,60 +1054,77 @@ class _MainLayoutState extends State<MainLayout>
                         child: NavigationDrawer(
                           selectedIndex: _selectedIndex,
                           onDestinationSelected: (int index) {
+                            final isLocalMode = PersistentStorageService().enableLocalMode;
+                            print('🖱️ [MainLayout] NavigationDrawer index selected: $index (LocalMode: $isLocalMode)');
+
                             // 如果点击的是设置按钮，触发开发者模式检测
-                            if (index == _settingsIndex) {
+                            if (!isLocalMode && index == _settingsIndex) {
                               DeveloperModeService().onSettingsClicked();
                             }
 
                             setState(() {
                               _selectedIndex = index;
+                              print('🔄 [MainLayout] _selectedIndex updated to: $_selectedIndex');
                             });
                             // 通知页面切换
                             PageVisibilityNotifier().setCurrentPage(index);
                           },
                           children: [
                             const SizedBox(height: 8),
-                            const NavigationDrawerDestination(
-                              icon: Icon(Icons.home_outlined),
-                              selectedIcon: Icon(Icons.home),
-                              label: Text('首页'),
-                            ),
-                            const NavigationDrawerDestination(
-                              icon: Icon(Icons.explore_outlined),
-                              selectedIcon: Icon(Icons.explore),
-                              label: Text('发现'),
-                            ),
-                            const NavigationDrawerDestination(
-                              icon: Icon(Icons.history_outlined),
-                              selectedIcon: Icon(Icons.history),
-                              label: Text('历史'),
-                            ),
-                            const NavigationDrawerDestination(
-                              icon: Icon(Icons.folder_open),
-                              selectedIcon: Icon(Icons.folder),
-                              label: Text('本地'),
-                            ),
-                            const NavigationDrawerDestination(
-                              icon: Icon(Icons.person_outlined),
-                              selectedIcon: Icon(Icons.person),
-                              label: Text('我的'),
-                            ),
-                            const NavigationDrawerDestination(
-                              icon: Icon(Icons.favorite_outline),
-                              selectedIcon: Icon(Icons.favorite),
-                              label: Text('支持'),
-                            ),
-                            const NavigationDrawerDestination(
-                              icon: Icon(Icons.settings_outlined),
-                              selectedIcon: Icon(Icons.settings),
-                              label: Text('设置'),
-                            ),
-                            if (DeveloperModeService().isDeveloperMode)
+                            if (PersistentStorageService().enableLocalMode) ...[
                               const NavigationDrawerDestination(
-                                icon: Icon(Icons.code),
-                                selectedIcon: Icon(Icons.code),
-                                label: Text('Dev'),
+                                icon: Icon(Icons.folder_open),
+                                selectedIcon: Icon(Icons.folder),
+                                label: Text('本地'),
                               ),
+                              const NavigationDrawerDestination(
+                                icon: Icon(Icons.settings_outlined),
+                                selectedIcon: Icon(Icons.settings),
+                                label: Text('本地设置'),
+                              ),
+                            ] else ...[
+                              const NavigationDrawerDestination(
+                                icon: Icon(Icons.home_outlined),
+                                selectedIcon: Icon(Icons.home),
+                                label: Text('首页'),
+                              ),
+                              const NavigationDrawerDestination(
+                                icon: Icon(Icons.explore_outlined),
+                                selectedIcon: Icon(Icons.explore),
+                                label: Text('发现'),
+                              ),
+                              const NavigationDrawerDestination(
+                                icon: Icon(Icons.history_outlined),
+                                selectedIcon: Icon(Icons.history),
+                                label: Text('历史'),
+                              ),
+                              const NavigationDrawerDestination(
+                                icon: Icon(Icons.folder_open),
+                                selectedIcon: Icon(Icons.folder),
+                                label: Text('本地'),
+                              ),
+                              const NavigationDrawerDestination(
+                                icon: Icon(Icons.person_outlined),
+                                selectedIcon: Icon(Icons.person),
+                                label: Text('我的'),
+                              ),
+                              const NavigationDrawerDestination(
+                                icon: Icon(Icons.favorite_outline),
+                                selectedIcon: Icon(Icons.favorite),
+                                label: Text('支持'),
+                              ),
+                              const NavigationDrawerDestination(
+                                icon: Icon(Icons.settings_outlined),
+                                selectedIcon: Icon(Icons.settings),
+                                label: Text('设置'),
+                              ),
+                              if (DeveloperModeService().isDeveloperMode)
+                                const NavigationDrawerDestination(
+                                  icon: Icon(Icons.code),
+                                  selectedIcon: Icon(Icons.code),
+                                  label: Text('开发者'),
+                                ),
+                            ],
                           ],
                         ),
                       ),
@@ -983,45 +1136,59 @@ class _MainLayoutState extends State<MainLayout>
     );
   }
 
-  /// 折叠状态下仅显示图标的目的地列表
   Widget _buildCollapsedDestinations(ColorScheme colorScheme) {
-    final List<_CollapsedItem> items = [
-      _CollapsedItem(
-        icon: Icons.home_outlined,
-        selectedIcon: Icons.home,
-        label: '首页',
-      ),
-      _CollapsedItem(
-        icon: Icons.explore_outlined,
-        selectedIcon: Icons.explore,
-        label: '发现',
-      ),
-      _CollapsedItem(
-        icon: Icons.history_outlined,
-        selectedIcon: Icons.history,
-        label: '历史',
-      ),
-      _CollapsedItem(
-        icon: Icons.folder_open,
-        selectedIcon: Icons.folder,
-        label: '本地',
-      ),
-      _CollapsedItem(
-        icon: Icons.person_outlined,
-        selectedIcon: Icons.person,
-        label: '我的',
-      ),
-      _CollapsedItem(
-        icon: Icons.favorite_outline,
-        selectedIcon: Icons.favorite,
-        label: '支持',
-      ),
-      _CollapsedItem(
-        icon: Icons.settings_outlined,
-        selectedIcon: Icons.settings,
-        label: '设置',
-      ),
-    ];
+    final isLocalMode = PersistentStorageService().enableLocalMode;
+    
+    final List<_CollapsedItem> items = isLocalMode
+        ? [
+            _CollapsedItem(
+              icon: Icons.folder_open,
+              selectedIcon: Icons.folder,
+              label: '本地',
+            ),
+            _CollapsedItem(
+              icon: Icons.settings_outlined,
+              selectedIcon: Icons.settings,
+              label: '本地设置',
+            ),
+          ]
+        : [
+            _CollapsedItem(
+              icon: Icons.home_outlined,
+              selectedIcon: Icons.home,
+              label: '首页',
+            ),
+            _CollapsedItem(
+              icon: Icons.explore_outlined,
+              selectedIcon: Icons.explore,
+              label: '发现',
+            ),
+            _CollapsedItem(
+              icon: Icons.history_outlined,
+              selectedIcon: Icons.history,
+              label: '历史',
+            ),
+            _CollapsedItem(
+              icon: Icons.folder_open,
+              selectedIcon: Icons.folder,
+              label: '本地',
+            ),
+            _CollapsedItem(
+              icon: Icons.person_outlined,
+              selectedIcon: Icons.person,
+              label: '我的',
+            ),
+            _CollapsedItem(
+              icon: Icons.favorite_outline,
+              selectedIcon: Icons.favorite,
+              label: '支持',
+            ),
+            _CollapsedItem(
+              icon: Icons.settings_outlined,
+              selectedIcon: Icons.settings,
+              label: '设置',
+            ),
+          ];
     if (DeveloperModeService().isDeveloperMode) {
       items.add(
         _CollapsedItem(
@@ -1050,11 +1217,16 @@ class _MainLayoutState extends State<MainLayout>
               child: InkWell(
                 borderRadius: BorderRadius.circular(16),
                 onTap: () {
-                  if (index == _settingsIndex) {
+                  final isLocalMode = PersistentStorageService().enableLocalMode;
+                  print('🖱️ [MainLayout] Collapsed Drawer item selected: $index (LocalMode: $isLocalMode)');
+                  
+                  if (!isLocalMode && index == _settingsIndex) {
                     DeveloperModeService().onSettingsClicked();
                   }
+                  
                   setState(() {
                     _selectedIndex = index;
+                    print('🔄 [MainLayout] _selectedIndex updated via Collapsed Drawer to: $_selectedIndex');
                   });
                   PageVisibilityNotifier().setCurrentPage(index);
                 },
@@ -1119,168 +1291,4 @@ class _CollapsedItem {
     required this.label,
   });
 }
-
-/// iOS 26 风格悬浮 Tab 项目数据
-class _FloatingTabItem {
-  final String svgAsset;
-  final String label;
-  const _FloatingTabItem({
-    required this.svgAsset,
-    required this.label,
-  });
-}
-
-/// iOS 26 液态玻璃容器
-/// 参考 Apple 的 Liquid Glass 设计语言
-class _LiquidGlassContainer extends StatelessWidget {
-  final Widget child;
-  final double borderRadius;
-  final double height;
-  final bool isDark;
-  
-  const _LiquidGlassContainer({
-    required this.child,
-    required this.borderRadius,
-    required this.height,
-    required this.isDark,
-  });
-  
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: height,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(borderRadius),
-        // 外部阴影
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.5 : 0.15),
-            blurRadius: 32,
-            offset: const Offset(0, 12),
-            spreadRadius: -4,
-          ),
-          // 底部环境光反射
-          BoxShadow(
-            color: ThemeManager.iosBlue.withOpacity(isDark ? 0.2 : 0.1),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-            spreadRadius: -8,
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(borderRadius),
-        child: BackdropFilter(
-          // 极致背景模糊
-          filter: ui.ImageFilter.blur(sigmaX: 60, sigmaY: 60),
-          child: CustomPaint(
-            painter: _LiquidGlassPainter(
-              borderRadius: borderRadius,
-              isDark: isDark,
-            ),
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(borderRadius),
-                // 半透明背景 - 增加噪点纹理感
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    (isDark ? const Color(0xFF3A3A3C) : Colors.white).withOpacity(isDark ? 0.6 : 0.5),
-                    (isDark ? const Color(0xFF1C1C1E) : Colors.white).withOpacity(isDark ? 0.4 : 0.2),
-                  ],
-                ),
-                // 边框由 Painter 绘制以实现渐变
-              ),
-              child: Stack(
-                children: [
-                  // 顶部高光
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    height: height / 2,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.white.withOpacity(isDark ? 0.1 : 0.4),
-                            Colors.white.withOpacity(0),
-                          ],
-                        ),
-                        borderRadius: BorderRadius.vertical(
-                          top: Radius.circular(borderRadius),
-                        ),
-                      ),
-                    ),
-                  ),
-                  // 内容
-                  child,
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 液态玻璃内阴影绘制器
-class _LiquidGlassPainter extends CustomPainter {
-  final double borderRadius;
-  final bool isDark;
-  
-  _LiquidGlassPainter({
-    required this.borderRadius,
-    required this.isDark,
-  });
-  
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Rect.fromLTWH(0, 0, size.width, size.height);
-    final rrect = RRect.fromRectAndRadius(rect, Radius.circular(borderRadius));
-    
-    // 1. 绘制细腻的边框 (渐变)
-    final borderPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0
-      ..shader = LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          Colors.white.withOpacity(isDark ? 0.3 : 0.8),
-          Colors.white.withOpacity(isDark ? 0.05 : 0.1),
-          Colors.white.withOpacity(isDark ? 0.05 : 0.1),
-          Colors.white.withOpacity(isDark ? 0.2 : 0.4),
-        ],
-        stops: const [0.0, 0.4, 0.6, 1.0],
-      ).createShader(rect);
-
-    canvas.drawRRect(rrect.deflate(0.5), borderPaint);
-    
-    // 2. 绘制内部反光 (Inset Light)
-    final innerGlowPaint = Paint()
-      ..shader = RadialGradient(
-        center: const Alignment(0, -0.8),
-        radius: 1.0,
-        colors: [
-          Colors.white.withOpacity(isDark ? 0.1 : 0.2),
-          Colors.transparent,
-        ],
-        stops: const [0.0, 0.7],
-      ).createShader(rect);
-      
-    canvas.save();
-    canvas.clipRRect(rrect);
-    canvas.drawRect(rect, innerGlowPaint);
-    canvas.restore();
-  }
-  
-  @override
-  bool shouldRepaint(covariant _LiquidGlassPainter oldDelegate) {
-    return oldDelegate.isDark != isDark || oldDelegate.borderRadius != borderRadius;
-  }
-}
+

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/song_detail.dart';
+import '../models/track.dart';
 import 'audio_source_service.dart';
 import 'lx_music_runtime_service.dart';
 
@@ -24,7 +25,9 @@ class AudioQualityService extends ChangeNotifier {
     AudioQuality.standard,   // 128k
     AudioQuality.exhigh,     // 320k
     AudioQuality.lossless,   // flac
-    AudioQuality.hires,      // flac24bit
+    AudioQuality.hires,      // Hi-Res (24bit/96kHz)
+    AudioQuality.jyeffect,   // Audio Vivid
+    AudioQuality.jymaster,   // 超清母带
   ];
   
   /// TuneHub 音源支持的音质（128k, 320k, flac, flac24bit）
@@ -40,6 +43,8 @@ class AudioQualityService extends ChangeNotifier {
     AudioQuality.standard,
     AudioQuality.exhigh,
     AudioQuality.lossless,
+    AudioQuality.hires,      // Hi-Res (24bit/96kHz) - 仅支持网易云
+    AudioQuality.jyeffect,   // Audio Vivid - 仅支持网易云
   ];
 
   /// 字符串音质转换为枚举
@@ -52,7 +57,12 @@ class AudioQualityService extends ChangeNotifier {
       case 'flac':
         return AudioQuality.lossless;
       case 'flac24bit':
+      case 'hires':
         return AudioQuality.hires;
+      case 'jyeffect':
+        return AudioQuality.jyeffect;
+      case 'jymaster':
+        return AudioQuality.jymaster;
       default:
         return null;
     }
@@ -68,8 +78,11 @@ class AudioQualityService extends ChangeNotifier {
       case AudioQuality.lossless:
         return 'flac';
       case AudioQuality.hires:
+        return 'hires';
+      case AudioQuality.jyeffect:
+        return 'jyeffect';
       case AudioQuality.jymaster:
-        return 'flac24bit';
+        return 'jymaster';
       default:
         return '320k';
     }
@@ -98,6 +111,22 @@ class AudioQualityService extends ChangeNotifier {
       case AudioSourceType.omniparse:
         return omniParseQualities;
     }
+  }
+  
+  /// 获取 OmniParse 音源针对特定平台支持的音质列表
+  /// hires 和 jyeffect 只支持网易云平台，其他平台需要降级
+  /// [source] - 音乐平台
+  List<AudioQuality> getOmniParseQualitiesForPlatform(MusicSource source) {
+    if (source == MusicSource.netease) {
+      // 网易云平台支持所有 OmniParse 音质
+      return omniParseQualities;
+    }
+    // 其他平台只支持基础音质
+    return [
+      AudioQuality.standard,
+      AudioQuality.exhigh,
+      AudioQuality.lossless,
+    ];
   }
   
   /// 获取指定平台支持的音质列表（洛雪音源专用）
@@ -198,6 +227,8 @@ class AudioQualityService extends ChangeNotifier {
         return '无损音质';
       case AudioQuality.hires:
         return 'Hi-Res';
+      case AudioQuality.jyeffect:
+        return 'Audio Vivid';
       case AudioQuality.jymaster:
         return '超清母带';
       default:
@@ -217,6 +248,8 @@ class AudioQualityService extends ChangeNotifier {
         return 'flac';
       case AudioQuality.hires:
         return 'Hi-Res';
+      case AudioQuality.jyeffect:
+        return 'Vivid';
       case AudioQuality.jymaster:
         return 'Master';
       default:
@@ -235,7 +268,9 @@ class AudioQualityService extends ChangeNotifier {
       case AudioQuality.lossless:
         return 'FLAC 无损，音质优秀';
       case AudioQuality.hires:
-        return 'Hi-Res FLAC 24bit，音质最佳';
+        return 'Hi-Res 24bit/96kHz';
+      case AudioQuality.jyeffect:
+        return 'Audio Vivid，沉浸体验';
       case AudioQuality.jymaster:
         return '超清母带，极致体验';
       default:
@@ -244,8 +279,9 @@ class AudioQualityService extends ChangeNotifier {
   }
 
   /// 获取QQ音乐的音质键名
-  String getQQMusicQualityKey() {
-    switch (_currentQuality) {
+  String getQQMusicQualityKey([AudioQuality? quality]) {
+    final q = quality ?? _currentQuality;
+    switch (q) {
       case AudioQuality.standard:
         return '128';
       case AudioQuality.exhigh:
@@ -259,8 +295,8 @@ class AudioQualityService extends ChangeNotifier {
 
   /// 从QQ音乐的music_urls中选择最佳可用音质
   /// 优先选择用户设定的音质，如果不存在则降级选择
-  String? selectBestQQMusicUrl(Map<String, dynamic> musicUrls) {
-    final preferredKey = getQQMusicQualityKey();
+  String? selectBestQQMusicUrl(Map<String, dynamic> musicUrls, [AudioQuality? requestedQuality]) {
+    final preferredKey = getQQMusicQualityKey(requestedQuality);
     
     // 音质优先级（从高到低）
     final qualityPriority = ['flac', '320', '128'];

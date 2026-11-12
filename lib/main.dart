@@ -6,7 +6,8 @@ import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
-import 'package:bitsdojo_window/bitsdojo_window.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
+
 import 'package:window_manager/window_manager.dart';
 import 'package:cyrene_music/layouts/fluent_main_layout.dart';
 import 'package:cyrene_music/layouts/main_layout.dart';
@@ -86,6 +87,25 @@ Future<void> main() async {
     await timed('WidgetsFlutterBinding.ensureInitialized', () {
       WidgetsFlutterBinding.ensureInitialized();
     });
+
+    // 桌面端：诊断显示器刷新率
+    if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+      try {
+        const channel = MethodChannel('com.cyrene.music/refresh_rate');
+        final rate = await channel.invokeMethod<double>('getMonitorRefreshRate');
+        if (rate != null && rate > 60) {
+          log('  显示器刷新率: ${rate.toStringAsFixed(0)}Hz');
+          log('  提示: 当前 SDK 版本不支持 targetPlatformFramerate，使用 RefreshRateBooster + DWM 优化');
+        }
+      } catch (e) {
+        log('⚠️ 获取显示器刷新率失败: $e');
+      }
+    }
+
+    await timed('LiquidGlassWidgets.initialize', () async {
+      await LiquidGlassWidgets.initialize();
+    });
+    log('✅ Liquid Glass 渲染管线已初始化');
   
     await timed('Platform check & initial logs', () {
       log(' 应用启动');
@@ -118,6 +138,11 @@ Future<void> main() async {
       await PersistentStorageService().initialize();
     });
     log(' 持久化存储服务已初始化');
+
+    await timed('ThemeManager.initialize', () async {
+      await ThemeManager().initialize();
+    });
+    log(' 主题服务已初始化');
 
     await timed('DeveloperModeService.initialize', () async {
       await DeveloperModeService().initialize();
@@ -315,23 +340,10 @@ Future<void> main() async {
     });
 
     await timed('runApp(MyApp)', () {
-      runApp(const MyApp());
+      runApp(LiquidGlassWidgets.wrap(const MyApp()));
     });
   
-    if (Platform.isWindows) {
-      await timed('doWhenWindowReady(Windows)', () {
-        doWhenWindowReady(() {
-          const initialSize = Size(1320, 880);
-          const minSize = Size(160, 60);
 
-          appWindow.minSize = minSize;
-          appWindow.size = initialSize;
-          appWindow.alignment = Alignment.center;
-          appWindow.title = 'Cyrene Music';
-          appWindow.show();
-        });
-      });
-    }
   }, (error, stack) {
     StartupLogger().log('runZonedGuarded: $error\n$stack');
   });
@@ -355,6 +367,10 @@ class _MyAppState extends State<MyApp> {
     Future.delayed(const Duration(milliseconds: 500), () {
       _setupAudioSourceCallback();
       _setupHighRefreshRate();
+      // 获取 context 后再次触发初始化以应用系统主题色（如果启用）
+      if (mounted) {
+        ThemeManager().initialize(context);
+      }
     });
   }
 
@@ -790,10 +806,11 @@ class _RefreshRateBoosterState extends State<RefreshRateBooster> with SingleTick
         AnimatedBuilder(
           animation: _controller,
           builder: (context, _) {
-            // 通过极小的不透明度变化触发重绘，但不产生视觉干扰
-            return const Opacity(
-              opacity: 0.001,
-              child: SizedBox(width: 1, height: 1),
+            // 动态改变透明度，强制引擎认为每一帧都是“脏的”，从而请求显示器最高刷新率所需的 VSync
+            // 0.001 - 0.002 之间的微小变化足以触发重绘，但几乎不可见
+            return Opacity(
+              opacity: 0.001 + (_controller.value * 0.001),
+              child: const SizedBox(width: 1, height: 1),
             );
           },
         ),

@@ -1,10 +1,11 @@
 import 'dart:io';
 import 'dart:ui';
 
-import 'package:bitsdojo_window/bitsdojo_window.dart';
+import 'package:window_manager/window_manager.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cyrene_music/models/track.dart';
 import 'package:cyrene_music/models/toplist.dart';
+import 'package:cyrene_music/utils/image_utils.dart';
 import 'package:cyrene_music/widgets/track_list_tile.dart';
 import 'package:cyrene_music/utils/theme_manager.dart';
 import 'package:cyrene_music/services/player_service.dart';
@@ -100,14 +101,18 @@ void _showToplistDetailSidebarFluent(BuildContext context, Toplist toplist) {
             ),
           ),
 
-          // 标题栏拖动区 (Overlay)
-          if (Platform.isWindows)
             Positioned(
               top: 0,
               left: 0,
               right: 0,
               height: 40,
-              child: MoveWindow(child: Container(color: Colors.transparent)),
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onPanStart: (details) {
+                  windowManager.startDragging();
+                },
+                child: Container(color: Colors.transparent),
+              ),
             ),
         ],
       );
@@ -161,13 +166,16 @@ void _showToplistDetailSidebar(BuildContext context, Toplist toplist) {
             ),
           ),
           // Windows 标题栏可拖动区域（覆盖在模糊层上方）
-          if (Platform.isWindows)
             Positioned(
               top: 0,
               left: 0,
               right: 0,
               height: 48, // 标题栏高度
-              child: MoveWindow(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onPanStart: (details) {
+                  windowManager.startDragging();
+                },
                 child: Container(
                   color: Colors.transparent,
                 ),
@@ -311,6 +319,7 @@ class _ToplistDetailContentFluent extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                   child: CachedNetworkImage(
                     imageUrl: toplist.coverImgUrl,
+                    httpHeaders: getImageHeaders(toplist.coverImgUrl),
                     fit: BoxFit.cover,
                   ),
                 ),
@@ -466,6 +475,7 @@ class _FluentTrackListTileState extends State<_FluentTrackListTile> {
              borderRadius: BorderRadius.circular(4),
              child: CachedNetworkImage(
                imageUrl: widget.track.picUrl,
+               httpHeaders: getImageHeaders(widget.track.picUrl),
                width: 40,
                height: 40,
                fit: BoxFit.cover,
@@ -550,6 +560,7 @@ class _ToplistDetailContent extends StatelessWidget {
                 clipBehavior: Clip.antiAlias,
                 child: CachedNetworkImage(
                   imageUrl: toplist.coverImgUrl,
+                  httpHeaders: getImageHeaders(toplist.coverImgUrl),
                   width: isDesktop ? 96 : 80, // 桌面端稍大
                   height: isDesktop ? 96 : 80,
                   fit: BoxFit.cover,

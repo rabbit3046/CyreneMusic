@@ -5,6 +5,7 @@ enum MusicSource {
   kugou,    // 酷狗音乐
   kuwo,     // 酷我音乐
   apple,    // Apple Music
+  spotify,  // Spotify
   local,    // 本地文件
 }
 
@@ -28,13 +29,24 @@ class Track {
 
   /// 从 JSON 创建 Track 对象
   factory Track.fromJson(Map<String, dynamic> json, {MusicSource? source}) {
+    MusicSource? effectiveSource = source;
+    
+    // 如果 JSON 中包含 source 字符串，优先使用它
+    if (json.containsKey('source') && json['source'] is String) {
+      final sourceStr = json['source'] as String;
+      effectiveSource = MusicSource.values.firstWhere(
+        (e) => e.name == sourceStr,
+        orElse: () => source ?? MusicSource.netease,
+      );
+    }
+
     return Track(
-      id: json['id'],  // 可以是 int 或 String
-      name: json['name'] as String,
-      artists: json['artists'] as String,
-      album: json['album'] as String,
-      picUrl: json['picUrl'] as String,
-      source: source ?? MusicSource.netease,
+      id: json['id'], // 可以是 int 或 String
+      name: json['name'] as String? ?? '',
+      artists: json['artists'] as String? ?? '',
+      album: json['album'] as String? ?? '',
+      picUrl: json['picUrl'] as String? ?? '',
+      source: effectiveSource ?? MusicSource.netease,
     );
   }
 
@@ -63,6 +75,8 @@ class Track {
         return '酷我音乐';
       case MusicSource.apple:
         return 'Apple Music';
+      case MusicSource.spotify:
+        return 'Spotify';
       case MusicSource.local:
         return '本地';
     }
@@ -81,6 +95,8 @@ class Track {
         return '🎸';
       case MusicSource.apple:
         return '🍎';
+      case MusicSource.spotify:
+        return '🟢';
       case MusicSource.local:
         return '📁';
     }
